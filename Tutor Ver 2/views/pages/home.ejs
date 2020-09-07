@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title> Home </title>
+        <meta name = "viewport" content = "width=device-width, initial-scale=1.0">
+        <link href = "assets/cssFiles/main_image.css" rel = "stylesheet" type = "text/css"/>
+        <link href = "assets/cssFiles/home_item.css" rel = "stylesheet" type = "text/css"/>
+        <link href = "assets/cssFiles/home.css" rel = "stylesheet" type = "text/css"/>
+         <%- include("controls/header") %>
+    </head>
+        <body id = "home">
+            <div class = "blogItems">
+            <% for ( var i = 0; i < data.blogInfo.length; i++) { %>
+                <%- include ("controls/home_item", {itemInfo: data.blogInfo[i], authorNames: data.authors[i], tags: data.blogTags[i]}); %>
+            <% } %>
+            </div>
+        </body>
+</html>

@@ -1,0 +1,9 @@
+{
+    "version": 3,
+    "mappings": "AAAA,AAAA,qBAAqB,CACrB;EACI,OAAO,EAAE,IACb;CAAC",
+    "sources": [
+        "properties.scss"
+    ],
+    "names": [],
+    "file": "properties.css"
+}

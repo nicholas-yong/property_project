@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title> Home </title>
+        <link href = "assets/cssFiles/content_item.css" rel = "stylesheet" type = "text/css"/>
+         <%- include("controls/header") %>
+    </head>
+        <body>
+            <%- include("controls/mainImage") %>
+            <%- include("controls/content_item", { blogData: data.blogContent, tagData: data.tagData }); %>
+        </body>
+</html>

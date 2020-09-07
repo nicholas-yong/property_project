@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title> Properties </title>
+        <link href = "assets/cssFiles/properties.css" rel = "stylesheet" type = "text/css"/>
+         <%- include("controls/header") %>
+
+         <script type = "text/javascript">
+            $(function() 
+            {
+              let suburbNames = JSON.parse( '<%- JSON.stringify( data.suburbNames ) %>' );
+              $("#Suburb").autocomplete({
+                source: suburbNames,
+                minLength: 2
+              });
+            });
+         </script>
+         <script type = "text/javascript">
+        </script>
+    </head>
+        <body>
+          
+          <form>
+            <div class = "suburb_input">
+              <span> Suburb: </span>
+              <input id = "Suburb" type = "text" aria-label= "Suburb Input">
+              <button onclick = "test()"> Search </button>
+            </div>
+          </form>
+
+          <table>
+
+          </table>
+        </body>
+</html>
+
+
+<script>
+    function showSuburbs()
+    {
+      document.getElementById('suburb_dropdown_menu').style.display = "block";
+    }
+</script>

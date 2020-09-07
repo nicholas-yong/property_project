@@ -1,0 +1,32 @@
+<div class = "border_box" >
+    <div class = "border_image">
+        <img src = <%- itemInfo.title_pic %> class = "border_borderImage" height = 200 width = 200 >
+    </div>
+    <div class = "border_content">
+        <div class = "title">
+            <p class = "title_text">
+                <%= itemInfo.title %>
+            </p>
+        </div>
+        <% for( var i = 0; i < tags.length; i++) { %>
+            <div class = "tag">
+                <p class = "tag_text">
+                <%= tags[i] %>
+                </p>
+            </div>
+        <% } %>
+        <div class = "content">
+            <p class = "content_text">
+                <%= itemInfo.content %>
+                <a href= "/content?id=<%- itemInfo.postid %>">
+                    <i class="fas fa-arrow-right fa-1x" id = "content_text_goto"></i>
+                </a>
+            </p>
+        </div>
+        <div class = "author">
+            <p class = "author_text">
+                By: <%= authorNames %>
+            </p>
+        </div>
+    </div>
+</div>
