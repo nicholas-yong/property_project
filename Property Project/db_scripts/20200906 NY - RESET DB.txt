@@ -1,0 +1,7 @@
+DELETE FROM properties;
+DELETE FROM files;
+DELETE FROM address;
+DELETE FROM images;
+UPDATE keytable
+SET key_value = 1;
+ALTER SEQUENCE properties_property_id_seq RESTART WITH 1;
