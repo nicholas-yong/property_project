@@ -10,23 +10,20 @@ from database import cur, conn
 
 client_id = "client_b90eaedfc6a2f7db118ac0266dec1c92"
 client_secret = "secret_3d6127c6a2e4bdfc5992d524b86bef8a"
-scopes = ['api_properties_read']
+scopes_properties = ['api_properties_read']
+scopes_listings = ['api_listings_read']
 auth_url = "https://auth.domain.com.au/v1/connect/token"
 url_endpoint_suburb_info = "https://api.domain.com.au/v1/properties/_suggest"
 url_endpoint_property_info = "https://api.domain.com.au/v1/properties/"
+url_endpoint_suburbListings_info = "https://api.domain.com.au/v1/listings/residential/_search"
 
 #store the access_token here
-access_token_cache = 'd5a92c35594895d1eda9b177d9a066d9'
+access_token_cache = 'f18382b9901fb576aad0d91aafa3831d'
 
-def get_properties_info( suburbName ):
-    auth = {'Authorization': 'Bearer ' + access_token}
-    url = url_endpoint_suburb_info + '?terms=' + str(suburbName) + '%26WA'
-    print(url)
-    req = requests.get( url, headers = auth )
-    results = req.json()
-    return results
-
-def get_access_token():
+### Connectivity Functions
+def get_access_token( scopes_type ):
+    #Set the endpoint scope that we are using.
+    scopes = scopes_type
     response = requests.post(auth_url, data = 
     {
         'client_id': client_id,
@@ -38,16 +35,21 @@ def get_access_token():
     json_res = response.json()
     print(json_res)
     return json_res['access_token']
+### End Connectivity Functions
+
+### GET Functions
+
+def getSuburbInfo( suburbName ):
+    auth = {'Authorization': 'Bearer ' + access_token}
+    url = url_endpoint_suburb_info + '?terms=' + str(suburbName) + 'WA'
+    print(url)
+    req = requests.get( url, headers = auth )
+    results = req.json()
+    return results
 
 def getSuburbList():
     file_object = open('suburb_list', 'r')
     return file_object
-
-#def domain-storeIDs(suburbData):
-    #check if property_id file exists
-    #property_id_file = open( 'property_id', 'a' )
-    #for x in suburbData:
-        #property_id_file.write( x['id'] + '\n' )
         
 def getPropertyInfo( domain_property_id ):
     auth = {'Authorization': 'Bearer ' + access_token }
@@ -56,20 +58,38 @@ def getPropertyInfo( domain_property_id ):
     results = req.json()
     return results
 
-#comment this Function for future use.
-#def updateJSON( ):
-#    all_current_properties = f""" SELECT p.domain_prop_id FROM properties p"""
-#    cur.execute( all_current_properties, "" )
-#    results = cur.fetchall()
-#    for result in results:
-#        property_info = getPropertyInfo(result[0])
-#        property_info = json.dumps(property_info)
-#        update_json_query = f""" UPDATE properties SET raw_json = '{property_info}' WHERE domain_prop_id = '{result[0]}'"""
-#        cur.execute( update_json_query )
-#    conn.commit()
-#    print( results );
+def getSuburbListingsInfo( suburbName ):
+    auth = {'Authorization': 'Bearer ' + access_token} 
+    url = url_endpoint_suburbListings_info
+    # Need to build the Suburb JSON object to the Domain API (build a Dict)
+    suburbObject = {
+        "listingType" : "Sale",
+        "propertyTypes": "House",
+        "minBedrooms": 3,
+        "minBathrooms": 2,
+        "locations":
+        {
+            "state": "WA",
+            "suburb": f"{suburbName}"
+        }
+    }
+    # Convert the suburbObject to a JSON-formatted string.
+    suburbObject_JSON = json.dumps( suburbObject )
+    print( suburbObject_JSON )
+    req = requests.post( url, headers = auth, json= suburbObject_JSON )
+    print( req )
+    results = req.json()
+    print( results )
+    
 
-def storeProperties():
+    
+
+### End Functions
+
+
+### DB Functions
+
+def DB_storeProperties():
     # this opens suburbs_list.txt and returns a list of suburbs seperated by a line from that file.
     suburb_list = getSuburbList()
     # this gets each line of the suburbs_list file.
@@ -77,7 +97,7 @@ def storeProperties():
 
     # initialize variables
     count = 0
-    true_count = 2
+    true_count = 21
 
     #Iterate through each line
     try:
@@ -85,10 +105,10 @@ def storeProperties():
             if count < true_count:
                 count = count + 1
                 continue
-            if count == 6:
+            if count == 36:
                 break
             else:
-                properties = get_properties_info(suburb)
+                properties = getSuburbInfo(suburb)
                 for property in properties:
                     property_info = getPropertyInfo(property['id'])
                     storePropertyInfo( property_info )
@@ -99,11 +119,13 @@ def storeProperties():
         conn.rollback()
         print(error)
 
+### End DB Functions.
+
 if len(access_token_cache) == 0:
-   access_token = get_access_token()
+  access_token = get_access_token( scopes_listings )
 else:
     access_token = access_token_cache
-storeProperties() 
+getSuburbListingsInfo("Armadale")
 
         
 

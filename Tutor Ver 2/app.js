@@ -17,7 +17,7 @@ client.connect();
 
 module.exports = client;
 
-let functions = require('/Users/nickh/Tutor Ver 2/functions');
+let functions = require( "C:/Users/nickh/Documents/GitHub/property_project/Tutor Ver 2/functions.js");
 const { isRegExp } = require('util');
 const { response } = require('express');
 
@@ -41,17 +41,34 @@ app.get('/', async ( req, res ) =>
     let blogData;
     let authorNames = [];
     let tags = [];
-    response = await client.query( 'SELECT * FROM blogposts b ORDER BY b.postid', blogData );
+
+    let query_response = [];
+
+    try
+    {
+        query_response = await client.query( 'SELECT * FROM blogposts b ORDER BY b.postid', blogData );
+    }
+    catch (error)
+    {
+        console.error();
+    }
     
     //get the name
-    for( i = 0 ; i < response.rows.length; i++)
+    for( i = 0 ; i < query_response.rows.length; i++)
     {
         let authorName = [0];
-        await functions.getName( response.rows[i].authorid, authorName );
-        tags.push( response.rows[i].tags.split(','));
+        try 
+        {
+            await functions.getName( query_response.rows[i].authorid, authorName );
+        } 
+        catch (error) 
+        {
+            console.error();
+        }
+        tags.push( query_response.rows[i].tags.split(','));
         authorNames.push( authorName[0] );
     }
-    res.render('pages/home', { data: { blogInfo: response.rows, authors : authorNames, blogTags: tags }} );
+    res.render('pages/home', { data: { blogInfo: query_response.rows, authors : authorNames, blogTags: tags }} );
 });
 
 app.get('/contacts', ( req, res ) =>
@@ -146,7 +163,6 @@ app.post("/", async ( req, res ) =>
 
 async function insertBlogPost( blogData, returnValue )
 {
-    console.log( "START");
     let ID_Array = [0];
     await functions.getNextID( 'postid', ID_Array );
     let ID = ID_Array[0];
@@ -166,6 +182,6 @@ async function insertBlogPost( blogData, returnValue )
 
 
 
-app.listen('3000');
+app.listen('4000');
 
-console.log("We are listening to Port 3000");
+console.log("We are listening to Port 4000");
