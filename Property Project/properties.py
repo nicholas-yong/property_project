@@ -1,10 +1,13 @@
 import psycopg2
 import json
-from user_functions import VarIf, convertJSONDate, getKeyValue, QueryWithSingleValue
+from user_functions import VarIf, convertJSONDate, getKeyValue, QueryWithSingleValue, returnNextSerialID, cleanStringForInsert
 from database import cur, conn
 
 PROPERTY_MARKET_STATUS_ONMARKET = "OnMarket"
 PROPERTY_MARKET_STATUS_OFFMARKET = "OffMarket"
+
+OBJECT_Listing = 2
+OBJECT_Property = 1
 
 ### Data Retrieval Functions
 
@@ -14,16 +17,6 @@ def DB_GetPropertyInfo( property_id ):
     """
     Need to get address, land_size, bedroom_number, bathroom_number, features, lat/long, suburb, whether its on the market or not.
     """
-
-
-
-
-
-
-
-
-
-
 
 ### End Data Retrieval Functions
 
@@ -167,6 +160,102 @@ def storeSalesHistory( salesHistoryObject, propertyID ):
         print("Offending Property Sales History Query: " +  sales_history_insert_statement )
         print(error)
 
+
+def StoreListings( listingObject ):
+    debug = open( "debug.txt", "w")
+    debug.write( json.dumps( listingObject ))
+
+    #Prepare the secondary dictionaries
+    listing_sales = {}
+    listing_sales_tenants = {}
+    listing_sales_saleDetails = {}
+    lisitng_inspections = {}
+    listing_prices = listingObject['priceDetails']
+
+    try:
+        #Insert the raw listing first.
+        #Get the listing_status
+        listing_status = QueryWithSingleValue( 'listing_status_lkp', 'description', listingObject['status'], 'listing_status_id', True )
+
+        #Test to see if the listing has any price details.
+        if 'price' in listing_prices:
+            price = listing_prices['price']
+        else:
+            price = 0
+        if 'priceFrom' in listing_prices:
+            priceFrom = listing_prices['priceFrom']
+        else:
+            priceFrom = 0
+        if 'priceTo' in listing_prices:
+            priceTo = listing_prices['priceTo']
+        else:
+            priceTo = 0
+        if 'buildingAreaSqm' in listingObject:
+            buildingAreaSqm = listingObject['buildingAreaSqm']
+        else:
+            buildingAreaSqm = 0
+        if 'landAreaSqm' in listingObject:
+            landAreaSqm = listingObject['landAreaSqm']
+        else:
+            landAreaSqm = 0
+        if 'energyEfficiencyRating' in listingObject:
+            energyEfficiencyRating = listingObject['energyEfficiencyRating']
+        else:
+            energyEfficiencyRating = 0
+
+        #build the JSON from listingObject
+        raw_listing_JSON = json.dumps( listingObject )
+
+        #Get the value that will be used with listing_insert_statement
+        listings_id = returnNextSerialID( 'listings', 'listings_id' )
+
+        listing_insert_statement = f""" INSERT INTO listings( domain_listings_id, headline, price_displayed, display_price, price, price_from, price_to, seo_url, listing_objective,
+                                                            listing_status, land_area, building_area, energy_efficiency, is_new_development, date_updated, date_created,
+                                                            entered_when, entered_by, raw_listing, inspection_appointment_only )
+                                        VALUES( '{listingObject['id']}', '{listingObject['headline']}', {listing_prices['canDisplayPrice']}, '{listing_prices['displayPrice']}', 
+                                                {price}, {priceFrom}, {priceTo}, '{listingObject['seoUrl']}', '{listingObject['objective']}', {listing_status}, {landAreaSqm}, {buildingAreaSqm},
+                                                {energyEfficiencyRating}, {listingObject['isNewDevelopment']}, to_timestamp( '{convertJSONDate(listingObject['dateUpdated'])}', 'YYYY-MM-DD HH24:MI:SS' ), 
+                                                to_timestamp( '{convertJSONDate(listingObject['dateListed'])}', 'YYYY-MM-DD HH24:MI:SS' ),  current_timestamp, 1, '{cleanStringForInsert(raw_listing_JSON)}', {listingObject['inspectionDetails']['isByAppointmentOnly']} ) """
+        cur.execute( listing_insert_statement, "" )
+
+        #Insert the Features if the listing contains any.
+        #Set the object type
+        link_object_type = OBJECT_Listing
+        storeFeatures( listings_id, link_object_type, listingObject['features'] )
+    except(Exception, psycopg2.DatabaseError) as error:
+        print(listing_insert_statement)
+        print(error)
+
+def storeFeatures( id, object_type, features ):
+    try:
+        for feature in features:
+            #Only insert if the feature doesn't exist.
+            check_feature_exists = f"SELECT feature_id FROM features_lkp WHERE UPPER( description ) = '{str.upper( feature )}'"
+            cur.execute( check_feature_exists, "" )
+            row = cur.fetchone()
+            if row ==  None:
+                feature_id = returnNextSerialID( 'object_features', 'feature_id' )
+                #We need to store the new feature inside the features table.
+                cur.execute( f""" INSERT INTO features_lkp( feature_id, description) VALUES( {feature_id}, '{cleanStringForInsert(feature)}' )""", "" )
+            else:
+                feature_id = row[0]
+            #Once we've acquired the feature_id...
+            object_features_insert_statement = f""" INSERT INTO object_features( id, object_type, feature_id, entered_when, entered_who )
+                                                    VALUES( {id}, {object_type}, {feature_id}, current_timestamp, 1 )"""
+            cur.execute( object_features_insert_statement, "")
+    except(Exception, psycopg2.DatabaseError) as error:
+        print(error)
+
+
+#def storeSuburbPostCode( suburbName, postCode ):
+#    try:
+#        suburb_postcode_insert_statement = f"""UPDATE suburbs SET postcode = '{postCode}' WHERE name = '{suburbName}'"""
+#        print( suburb_postcode_insert_statement )
+#        cur.execute( suburb_postcode_insert_statement, "" )
+#        conn.commit()
+#    except(Exception, psycopg2.DatabaseError) as error:
+#        print("Offending Property Sales History Query: " +  suburb_postcode_insert_statement )
+#        print(error)
 
 
 #######  Start of Commands                                                                                                                                         ##########################

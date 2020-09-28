@@ -38,3 +38,20 @@ def QueryWithSingleValue( tableName, searchColumn, searchValue, valueColumn, sea
     except(Exception, psycopg2.DatabaseError) as error:
         print("Offending Query: " + query)
         print(error)
+
+def returnNextSerialID( tableName, serialColumn ):
+    try:
+        #To avoid getting an error, we need to check to see if there are any rows in the table.
+        serial_search_query = f"""SELECT MAX({serialColumn}) FROM {tableName}"""
+        cur.execute( serial_search_query, "" )
+        row = cur.fetchone()
+        if row[0] != None:
+            return row[0] + 1
+        else:
+            return 1
+    except(Exception, psycopg2.DatabaseError) as error:
+        print("Offending Query: " + serial_search_query)
+        print(error)
+
+def cleanStringForInsert( strToClean ):
+    return strToClean.replace( "'", "''" )
