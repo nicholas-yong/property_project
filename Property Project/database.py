@@ -11,7 +11,7 @@ def connect():
                 host = "localhost",
                 database = "domain_properties",
                 user = "postgres",
-                password = "namihana"
+                password = "BankaiTensaKageyoshi"
         )
         
         #Create a Cursor
