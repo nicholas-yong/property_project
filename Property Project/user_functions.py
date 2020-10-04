@@ -2,21 +2,45 @@ from database import cur, conn
 import psycopg2
 
 
-def VarIf( expression, string1, string2 ):
+def VarIf( expression, trueParameter, falseParameter ):
+    """
+    Function returns the firstParameter if the expression evaluates to True. Otherwise it returns the second parameter.
+
+    Keyword arguements:
+    expresion -- Expression to evaluate.
+    firstParameter -- Parameter that is returned if expression evaluates to True.
+    secondParameter - Parameter that is returned if expression evalutes to False.
+
+    """
     if expression:
-        return string1
+        return trueParameter
     else:
-        return string2
+        return falseParameter
 
 
 def convertJSONDate( jsonDATE ):
+    """
+    This Function converts a JSON formatted date into a date_string that can be inserted into postgres. (The Function returns the converted string).
+
+    Keyword arguements:
+    jsonDATE -- Json Formatted Date String to format.
+
+    """
     convert_string = jsonDATE.replace( "T", " " )
-    strip_index = convert_string.find( ".")
+    strip_index = convert_string.find( "Z" )
     convert_string = convert_string[:-(len(convert_string) - strip_index)]
     return convert_string
 
 
 def getKeyValue( key ):
+    """
+    This Function retrieves the keyvalue of a particular keyword inside the keytable table.
+    After retrieving the keyvalue, it then incremenets that keyvalue (by the keyword's incval).
+
+    Keyword arguements:
+    key -- Keyword Name.
+
+    """
     try:
         query =  f"SELECT k.key_value FROM keytable k WHERE k.key_name = '{key}'"
         cur.execute( query, "")
@@ -29,6 +53,22 @@ def getKeyValue( key ):
         print(error)
 
 def QueryWithSingleValue( tableName, searchColumn, searchValue, valueColumn, searchRequiresQuotes ):
+    """
+    This Function retrieves a single value from a Sql Query built from the various passed parameters.
+
+    The format is:
+    SELECT (valueColumn) FROM (tableName) WHERE (searchColumn) = (appended_search_value)
+
+    If there are multiple values returned from the query, only the very first one is returned.
+
+    Keyword arguements:
+    tableName -- Name of the Table.
+    searchColumn -- Comparison Column(against searchValue)
+    searchValue -- Value we are using in the search.
+    valueColumn -- Column that holds the value we are searching for.
+    searchRequiresQuotes -- If True, a set of quotes is appended to the searchValue.
+
+    """
     try:
         appended_search_value = VarIf(searchRequiresQuotes, "'" + searchValue + "'", searchValue )
         query =  f"SELECT {valueColumn} FROM {tableName} WHERE {searchColumn} = {appended_search_value}"
@@ -40,6 +80,14 @@ def QueryWithSingleValue( tableName, searchColumn, searchValue, valueColumn, sea
         print(error)
 
 def returnNextSerialID( tableName, serialColumn ):
+    """
+    Function returns the next id for a serial type column inside the database. (1 is returned if there are no rows inside the table)
+
+    Keyword arguements:
+    tableName -- Name of table where the serialColumn resides.
+    serialColumn -- Name of the Serial Column.
+
+    """
     try:
         #To avoid getting an error, we need to check to see if there are any rows in the table.
         serial_search_query = f"""SELECT MAX({serialColumn}) FROM {tableName}"""
@@ -54,4 +102,27 @@ def returnNextSerialID( tableName, serialColumn ):
         print(error)
 
 def cleanStringForInsert( strToClean ):
+    """
+    Function (currently) replaces all single quotes inside a string to double quotes. (This is to escape the quotes for inserting into postgres)
+
+    Keyword arguements:
+    strToClean -- String parameter to clean. (this is returned by the function)
+
+    """
     return strToClean.replace( "'", "''" )
+
+def checkRowExists( query ):
+    """
+    Function checks to see if a particular row exists inside the query parameter. The query parameter should be formatted in this fashion:
+    SELECT 1 FROM (tableName) WHERE (columnName) = (valueToFind)
+
+    Keyword arguements:
+    query -- The query that checks to see if a particular row exists (as described above).
+
+    """
+    try:
+        cur.execute( query, "" )
+        return cur.fetchone() is not None
+    except(Exception, psycopg2.DatabaseError ) as error:
+        print (error + " Offending Query: " + query )
+

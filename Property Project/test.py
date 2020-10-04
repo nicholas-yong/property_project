@@ -3,7 +3,7 @@ import sys
 import requests
 import os.path
 from os import path
-from user_functions import QueryWithSingleValue
+from user_functions import QueryWithSingleValue, checkRowExists
 import psycopg2
 from properties import storePropertyInfo, StoreListings
 from database import cur, conn
@@ -18,9 +18,17 @@ url_endpoint_suburb_info = "https://api.domain.com.au/v1/properties/_suggest"
 url_endpoint_property_info = "https://api.domain.com.au/v1/properties/"
 url_endpoint_suburbListings_info = "https://api.domain.com.au/v1/listings/residential/_search"
 url_endpoint_listings_info = "https://api.domain.com.au/v1/listings/"
+url_endpoint_agencies_info = "https://api.domain.com.au/v1/agencies/"
+url_endpoint_agent_info = "https://api.domain.com.au/v1/agents"
 
-#store the access_token here
-access_token_cache = '1cbc7a7fb8c7cd16c0a51e98848e08ce'
+#Constants for Access Tokens
+listings_access_token_cache = ''
+agencies_access_token_cache = ''
+properties_access_token_cache = ''
+
+listings_access_token = 'cb7a168117d228d09cb59a8fb61325fa'
+agencies_access_token = '9fe9bbf0d7d12fce4e00fe59695f5fcb'
+properties_access_token = '707381bae7a6436b604fd4a34ef3812b'
 
 ### Connectivity Functions
 def get_access_token( scopes_type ):
@@ -42,7 +50,7 @@ def get_access_token( scopes_type ):
 ### GET Functions
 
 def getSuburbInfo( suburbName ):
-    auth = {'Authorization': 'Bearer ' + access_token}
+    auth = {'Authorization': 'Bearer ' + properties_access_token}
     url = url_endpoint_suburb_info + '?terms=' + str(suburbName) + 'WA'
     print(url)
     req = requests.get( url, headers = auth )
@@ -54,14 +62,14 @@ def getSuburbList():
     return file_object
         
 def getPropertyInfo( domain_property_id ):
-    auth = {'Authorization': 'Bearer ' + access_token }
+    auth = {'Authorization': 'Bearer ' + properties_access_token }
     url = url_endpoint_property_info + str(domain_property_id)
     req = requests.get( url, headers = auth )
     results = req.json()
     return results
 
 def getSuburbListingsInfo( suburbName ):
-    auth = {'Authorization': 'Bearer ' + access_token} 
+    auth = {'Authorization': 'Bearer ' + listings_access_token } 
     url = url_endpoint_suburbListings_info
     postCode = QueryWithSingleValue( "suburbs", "name", suburbName, "postcode", True )
     # Need to build the Suburb JSON object to the Domain API (build a Dict)
@@ -90,6 +98,7 @@ def getSuburbListingsInfo( suburbName ):
     # Send the request to the Residential Search listings endpoint.
     req = requests.post( url, headers = auth, data= suburbObject_JSON )
     # Get the results.
+    print( req )
     results = req.json()
     debug = open( "debug.txt", "w")
     debug.write( json.dumps( results ) )
@@ -99,16 +108,107 @@ def getSuburbListingsInfo( suburbName ):
     #    StoreListing( listingObject )
 
 def getListing( listing_id ):
-    auth = {'Authorization': 'Bearer ' + access_token }
+    auth = {'Authorization': 'Bearer ' + listings_access_token }
     url = url_endpoint_listings_info + str(listing_id)
     req = requests.get( url, headers = auth )
     results = req.json()
     return results
+
+def getAgency( agency_id ):
+    auth = {'Authorization': 'Bearer ' + agencies_access_token }
+    url = url_endpoint_agencies_info + str(agency_id)
+    req = requests.get(url, headers = auth)
+    results = req.json()
+    return results
+
+def getAgent( agent_id ): 
+    auth = {'Authorization': 'Bearer ' + agencies_access_token }
+    url = url_endpoint_agent_info + str(agent_id)
+    req = requests.get(url, headers = auth)
+    results = req.json()
+    return results
+
+def getAccessTokens():
+    access_token_file = open( "access_tokens.txt", "a" )
+    access_token_file.truncate(0)
+    global properties_access_token
+    global listings_access_token
+    global agencies_access_token
+    #Get and set properties access token
+    #Set the endpoint scope that we are using.
+    if properties_access_token_cache == '':
+        scopes = scopes_properties
+        response = requests.post(auth_url, data = 
+        {
+            'client_id': client_id,
+            'client_secret': client_secret,
+            'grant_type': 'client_credentials',
+            'scope': scopes,
+            'Content-Type': 'text/json'
+        })
+        json_res = response.json()
+        access_token_file.write( 'properties ' + json_res['access_token'] + '\n'  )
+        properties_access_token = json_res['access_token']
+    else:
+        properties_access_token = properties_access_token_cache
     
+    if listings_access_token_cache == '':
+        #Get and set listings access token
+        scopes = scopes_listings
+        response = requests.post(auth_url, data = 
+        {
+            'client_id': client_id,
+            'client_secret': client_secret,
+            'grant_type': 'client_credentials',
+            'scope': scopes,
+            'Content-Type': 'text/json'
+        })
+        json_res = response.json()
+        access_token_file.write( 'listings ' + json_res['access_token'] + '\n' )
+        listings_access_token = json_res['access_token']
+    else:
+        listings_access_token = listings_access_token_cache
+
+    if agencies_access_token_cache == '':
+        #Get and set agencies access token
+        scopes = scopes_agencies
+        response = requests.post(auth_url, data = 
+        {
+            'client_id': client_id,
+            'client_secret': client_secret,
+            'grant_type': 'client_credentials',
+            'scope': scopes,
+            'Content-Type': 'text/json'
+        })
+        json_res = response.json()
+        access_token_file.write( 'agencies ' + json_res['access_token'] + '\n' )
+        agencies_access_token = json_res['access_token']
+    else:
+        agencies_access_token = agencies_access_token_cache
+    
+    access_token_file.close()
 ### End Functions
 
+### Storage Functions (Not the actual storage functions, but these act as the function initializers)
 
-### DB Functions
+def storeFullListing( listing_id ):
+    #Get thje listingObject via the getListing Function
+    listingObject = getListing( listing_id )
+    try:
+        #Once we've obtained the listingObject, store it.
+        StoreListings( listingObject )
+        #If the listing is successfully stored...
+        #Check to see if it was advertised by an agency, and if it was, check to see if that agency and its agents have already been stored.
+        if 'advertiserIdentifiers' in listingObject and listingObject['advertiserIdentifiers']['advertiserType'] == 'agency':
+            advertiserObject = listingObject['advertiserIdentifiers']
+            if not checkRowExists( f"SELECT 1 FROM agencies WHERE domain_agency_id = {advertiserObject['advertiserId']} " ):
+                #Get the Agency Information
+                agencyObject = getAgency( advertiserObject['advertiserId']
+                storeAgency(agencyObject)
+    except( Exception, psycopg2.DatabaseError ) as error:
+        print(error)
+
+
 
 #def DB_storeProperties():
     # this opens suburbs_list.txt and returns a list of suburbs seperated by a line from that file.
@@ -130,15 +230,13 @@ def getListing( listing_id ):
 
 ### End DB Functions.
 
-### Let's store the listing first. Then request the access token for the agencies endpoint.
-if len(access_token_cache) == 0:
-  access_token = get_access_token( scopes_listings )
-else:
-    access_token = access_token_cache
-listing_id = 2016469542
-listingObject = getListing(listing_id)
-StoreListings(listingObject)
-conn.commit()
+### This always has to be called at the start of running test.py
+getAccessTokens( )
+#getSuburbListingsInfo( 'Alexander Heights')
+#listing_id = 2016460000
+#listingObject = getListing(listing_id)
+#StoreListings(listingObject)
+#conn.commit()
 
         
 

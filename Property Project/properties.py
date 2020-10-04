@@ -1,24 +1,8 @@
 import psycopg2
 import json
-from user_functions import VarIf, convertJSONDate, getKeyValue, QueryWithSingleValue, returnNextSerialID, cleanStringForInsert
+from user_functions import VarIf, convertJSONDate, getKeyValue, QueryWithSingleValue, returnNextSerialID, cleanStringForInsert, checkRowExists
 from database import cur, conn
-
-PROPERTY_MARKET_STATUS_ONMARKET = "OnMarket"
-PROPERTY_MARKET_STATUS_OFFMARKET = "OffMarket"
-
-OBJECT_Listing = 2
-OBJECT_Property = 1
-
-### Data Retrieval Functions
-
-def DB_GetPropertyInfo( property_id ):
-    #What sort of columns do we need to retrieve?
-    
-    """
-    Need to get address, land_size, bedroom_number, bathroom_number, features, lat/long, suburb, whether its on the market or not.
-    """
-
-### End Data Retrieval Functions
+from user_constants import *
 
 ### Data Storage Functions
 
@@ -166,10 +150,8 @@ def StoreListings( listingObject ):
     debug.write( json.dumps( listingObject ))
 
     #Prepare the secondary dictionaries
-    listing_sales = {}
-    listing_sales_tenants = {}
-    listing_sales_saleDetails = {}
-    lisitng_inspections = {}
+    listing_sales = listingObject['saleDetails']
+    lisitng_inspections = listingObject['inspectionDetails']
     listing_prices = listingObject['priceDetails']
 
     try:
@@ -220,13 +202,160 @@ def StoreListings( listingObject ):
 
         #Insert the Features if the listing contains any.
         #Set the object type
-        link_object_type = OBJECT_Listing
-        storeFeatures( listings_id, link_object_type, listingObject['features'] )
+        #Only do this if the listing already has a features object.
+        if 'features' in listingObject:
+            link_object_type = OBJECT_Listing
+            storeFeatures( listings_id, link_object_type, listingObject['features'] )
+
+        #Store any media attached to the listing
+        for media in listingObject['media']:
+            storeMedia( FILE_TYPE_Images, OBJECT_Listing, 1, str(listings_id), None, media )
+
+        #Store Listing Sales Information.
+        #First, we need to check if the listings has any sales information attached to it.
+        if 'saleDetails' in listingObject:
+            listing_sales = listingObject['saleDetails']
+            storeListingSalesDetails( listing_sales, listings_id )
+
+        #Store the Inspection information
+        storeInspectionDetails( listings_id, lisitng_inspections )
+
+
     except(Exception, psycopg2.DatabaseError) as error:
         print(listing_insert_statement)
         print(error)
 
+def storeListingSalesDetails( listingSalesObject, listings_id ):
+    try:
+        #Need to build the individual variables first unfortuantely.
+        if 'saleTerms' in listingSalesObject:
+            saleTerms = listingSalesObject['saleTerms']
+        else:
+            saleTerms = "NULL"
+        if 'annualReturn' in listingSalesObject:
+            annualReturn = listingSalesObject['annualReturn']
+        else:
+            annualReturn = "NULL"
+
+        #Check if there are any tenant details inside the listingSalesObject
+        if 'tenderDetails' in listingSalesObject:
+            tenderDetails = listingSalesObject['tenderDetails']
+            #Get the Tenant Details
+            if 'tenderAddress' in tenderDetails:
+                tenderAddress = tenderDetails['tenderAddress']
+                tenderDate = tenderDetails['tenderEndDate']
+                tenderName = tenderDetails['tenderRecipientName']
+            else:
+                tenderAddress = "NULL"
+                tenderDate = "NULL"
+                tenderName = "NULL"
+        else:
+            tenderAddress = "NULL"
+            tenderDate = "NULL"
+            tenderName = "NULL"
+        
+        #Get the Sales_ID that will be inserted for future use.
+        sales_id = returnNextSerialID( 'listing_sales', 'sales_id' )
+
+        #We probably don't need to split the listingSalesObject.
+        listing_sales_insert_statement = f""" INSERT INTO listing_sales( listings_id, sale_method, sale_terms, annual_return, tender_address, tender_date, tender_name, entered_when )
+                                              VALUES( {listings_id}, '{listingSalesObject['saleMethod']}', '{saleTerms}', {annualReturn},
+                                                      '{tenderAddress}', {VarIf( tenderDate != "NULL", f" to_timestamp( '{convertJSONDate(tenderDate)}', 'YYYY-MM-DD HH24:MI:SS' )", "NULL")}, '{tenderName}', current_timestamp) """
+
+        cur.execute( listing_sales_insert_statement, "" )
+
+        #Once we successfully insert the main listing_sales object, insert the two minor listing sale objects
+        if 'soldDetails' in listingSalesObject:
+            storeListingSalesSoldDetails( sales_id, listingSalesObject['soldDetails'] )
+        if 'tenantDetails' in listingSalesObject:
+            storeListingSalesTenantDetails( sales_id, listingSalesObject['tenantDetails'])
+
+    except(Exception, psycopg2.DatabaseError) as error:
+        print(listing_sales_insert_statement)
+        print(error)
+
+def storeListingSalesSoldDetails( sales_id, soldDetailsObject ):
+    try:
+        #I'm going to guess that if the Sold Details Object exists, then the soldPrice and soldDate variables have to exist too. (Otherwise it doesn't really make any sense to be honest.)
+        #This means that we only need to check for the remaining three variables that we are keeping track of.
+        if 'canDisplayPrice' in soldDetailsObject:
+            canDisplayPrice = soldDetailsObject['canDisplayPrice']
+        else:
+            canDisplayPrice = "NULL"
+        if 'soldAction' in soldDetailsObject:
+            soldAction = soldDetailsObject['soldAction']
+        else:
+            soldAction = "NULL"
+        if 'source' in soldDetailsObject:
+            source = soldDetailsObject['source']
+        else:
+            source = "NULL"
+
+        listing_sales_soldDetails_insert_statement = f""" INSERT INTO listing_sales_sold_details( sales_id, sold_price, sold_date, source, sold_action, was_price_displayed )
+                                                          VALUES( {sales_id}, {soldDetailsObject['soldPrice']}, to_timestamp( '{soldDetailsObject['soldDate']}', 'YYYY-MM-DD') , '{source}', '{soldAction}', {canDisplayPrice} )"""
+        cur.execute( listing_sales_soldDetails_insert_statement, "" )
+                                                                  
+    except(Exception, psycopg2.DatabaseError ) as error:
+        print( listing_sales_soldDetails_insert_statement )
+        print( error )
+
+def storeListingSalesTenantDetails( sales_id, tenantObject ):
+    try:
+        #Store the Tenant Details directly.
+        listing_sales_tenantDetails_insert_statement = f""" INSERT INTO listing_sales_tenants( sales_id, raw_tenant_details_json )
+                                                            VALUES( {sales_id}, '{tenantObject}' ) """
+        
+        cur.execute( listing_sales_tenantDetails_insert_statement, "" )
+    except(Exception, psycopg2.DatabaseError ) as error:
+        print( listing_sales_tenantDetails_insert_statement )
+        print( error )
+
+def storeInspectionDetails( listing_id, inspectionObject ):
+    try:
+        #Need to build the inspections and past inspections objects.
+        past_inspections = inspectionObject['pastInspections']
+        current_inspections = inspectionObject['inspections']  
+
+        #do past_inspections first.
+        for inspection in past_inspections:
+            if 'description' in inspection:
+                description = inspection['description']
+            else:
+                description = "NULL"
+                
+            listing_inspection_insert_statement = f""" INSERT INTO listing_inspections( opening_time, closing_time, description, recurring, is_past, listings_id, entered_when )
+                                                       VALUES( to_timestamp( '{convertJSONDate(inspection['openingDateTime'])}', 'YYYY-MM-DD HH24:MI:SS' ), 
+                                                               to_timestamp( '{convertJSONDate(inspection['closingDateTime'])}','YYYY-MM-DD HH24:MI:SS' ), '{description}', 
+                                                               '{inspection['recurrence']}', {True} , {listing_id}, current_timestamp ) """
+            cur.execute( listing_inspection_insert_statement, "" )
+        for inspection in current_inspections:
+            if 'description' in inspection:
+                description = inspection['description']
+            else:
+                description = "NULL"
+                
+            listing_inspection_insert_statement = f""" INSERT INTO listing_inspections( opening_time, closing_time, description, recurring, is_past, listings_id, entered_when )
+                                                       VALUES( to_timestamp( '{convertJSONDate(inspection['openingDateTime'])}', 'YYYY-MM-DD HH24:MI:SS' ), 
+                                                               to_timestamp( '{convertJSONDate(inspection['closingDateTime'])}','YYYY-MM-DD HH24:MI:SS' ), '{description}', 
+                                                               '{inspection['recurrence']}', {False}, {listing_id}, current_timestamp ) """
+            cur.execute( listing_inspection_insert_statement, "" )
+
+    except(Exception, psycopg2.DatabaseError ) as error:
+        print(error)
+
 def storeFeatures( id, object_type, features ):
+    """
+    Stores a list of tuple of features inside the object_features table. For each feature inside the features tuple, it first queries the features_lkp table to check if that feature already exists inside the table.
+    If it does, it retrieves that feature's feature_id. Otherwise, it inserts that feature into the features_lkp table and returns the newly inserted feature's feature_id.
+    It then uses the feature's feature_id and the id of the object to create a linking row inside the object_features table
+
+    Keyword arguements:
+    id -- ID of the Object that the features are being linked against.
+    object_type -- Object Type of the Object that the features are being linked against.
+    features -- Tuple of features that are going to be linked against the object.
+
+    """
+
     try:
         for feature in features:
             #Only insert if the feature doesn't exist.
@@ -247,18 +376,73 @@ def storeFeatures( id, object_type, features ):
         print(error)
 
 
-#def storeSuburbPostCode( suburbName, postCode ):
-#    try:
-#        suburb_postcode_insert_statement = f"""UPDATE suburbs SET postcode = '{postCode}' WHERE name = '{suburbName}'"""
-#        print( suburb_postcode_insert_statement )
-#        cur.execute( suburb_postcode_insert_statement, "" )
-#        conn.commit()
-#    except(Exception, psycopg2.DatabaseError) as error:
-#        print("Offending Property Sales History Query: " +  suburb_postcode_insert_statement )
-#        print(error)
+def storeMedia( file_type, linked_to_object_type, document_type, keyval1, keyval2, mediaObject ):
+    """
+    Stores a Media Object. 
+
+    Keyword arguements:
+    file_type -- The File Type of the mediaObject being stored. Either 'documents' or 'images'.
+    linked_to_object_type -- The Object Type of the Object that mediaObject is being linked to. (stored inside object_type_lkp)
+    document_type -- The Document Type of mediaObject. (stored inside document_type)
+    keyval1 -- The First keyvalue of the object that mediaObject is being linked to. (This will depend on the object type of the object that is being linked to)
+    keyval2 -- The Second keyvalue of the object that mediaObject is being linked to. (This will depend on the object type of the object that is being linked to)
+    mediaObject -- The actual mediaObject being linked.
+
+    """
+    try:
+        if file_type == FILE_TYPE_Documents:
+            # Return False for now. We don't have support for documents yet.
+            return False
+        elif file_type == FILE_TYPE_Images:
+            #Check if its part of an advert.
+            if 'advertId' in mediaObject:
+                advertID = mediaObject['advertId']
+            else:
+                advertID = "NULL"
+            if 'date' in mediaObject:
+                dateTaken = convertJSONDate(  mediaObject['date'] )
+            else:
+                dateTaken = None
+            #Set the url depending on if we are getting it from the listings or properties field. (The Object MUST have a Url)
+            if 'url' in mediaObject:
+                image_url = mediaObject['url']
+            elif 'fullUrl' in mediaObject:
+                image_url = mediaObject['fullUrl']
+            else:
+                raise ValueError( 'No image url provided in mediaObject')
+            #Generate the statement required to insert the image into the images table. (if it doesn't already exist.)
+            #Check to see if the image already exists. (via url).
+            if not checkRowExists( f" SELECT 1 FROM images WHERE url = '{image_url}'" ):
+                file_id = returnNextSerialID( 'images', 'image_id' )
+                image_insert_statement = f"""  INSERT INTO images( advert_id, date_taken, url ) VALUES ( {advertID}, {VarIf( dateTaken is not None, f"to_timestamp( {dateTaken}, 'YYYY-MM-DD HH24:MI:SS' )", "NULL")}, '{image_url}' ) """
+                cur.execute( image_insert_statement, "" )
+            else:
+                #Get the image_id of the existing iamge.
+                cur.execute( f" SELECT image_id FROM images WHERE url = '{image_url}' ", "" )
+                result = cur.fetchone()
+                file_id = result[0]
+        else:
+            raise ValueError('Invalid Value for fileType')
+        
+        #Once the file has been inserted into its respective table (documents/images), then we can insert the link into the files table.
+        files_insert_statement = f""" INSERT INTO files( file_id, file_type, object_type, keyval1, keyval2, entered_when, document_type )
+                                      VALUES( {file_id}, '{file_type}', {linked_to_object_type}, '{keyval1}', '{keyval2}', current_timestamp, {document_type} ) """
+        cur.execute( files_insert_statement, "" )
+    except ValueError as error:
+        print(error)
+        return False
+
+    
 
 
-#######  Start of Commands                                                                                                                                         ##########################
+
+
+
+
+
+
+
+#######  Start of Commands
 
 
 
