@@ -14,23 +14,25 @@ def storePropertyInfo( propertyObject ):
     #We need to split the propertyObject into several smaller dictionaries for the sub tables.
     history = {}
     files = {}
-    address = {}
 
-    #We can assume that each property will always have an address, so we do not need to test for its existence.
-    address['address_id'] = getKeyValue('address_id')
-    address['full_address'] =  propertyObject['address']
-    address['street_name'] = propertyObject['streetName']
-    address['street_number'] = propertyObject['streetNumber']
-    address['street_type'] = propertyObject['streetType']
-    address['suburb_id'] = QueryWithSingleValue( "suburbs", "name", propertyObject['suburb'], "suburb_id", True )
-    address['postcode'] = propertyObject['postcode']
     if 'zone' in propertyObject:
-        address['zone'] = propertyObject['zone']
+        zone = propertyObject['zone']
+    else:
+        zone = None
+
     if 'lotNumber' in propertyObject:
-        address['lot_number'] = propertyObject['lotNumber']
+        lot_number  = propertyObject['lotNumber']
+    else:
+        lot_number = None
+
     if 'addressCoordinate' in propertyObject:
-        address['lon'] = propertyObject['addressCoordinate']['lon']
-        address['lat'] = propertyObject['addressCoordinate']['lat']
+        longitude = propertyObject['addressCoordinate']['lon']
+        lattitude= propertyObject['addressCoordinate']['lat']
+    else:
+        longitude = None
+        lattitude = None
+
+
     if "history" in propertyObject:
         history['history'] = propertyObject['history']
     if "photos" in propertyObject:
@@ -56,13 +58,13 @@ def storePropertyInfo( propertyObject ):
 
     try:
         #store the address first
-        storeAddress( address )
+        address_id = storeAddress( propertyObject['address'], propertyObject['streetName'], propertyObject['street_number'], propertyObject['suburb'], zone, lot_number, longitude, lattitude )
         raw_json = json.dumps(propertyObject)
         #once done, split the information. But for now, let's just do a test.
         insert_statement = f""" INSERT INTO properties( domain_prop_id, shape_of_land, on_market, address_id, area_size, num_bedrooms, num_bathrooms, 
                                                         features, entered_when, raw_json )
                                 VALUES( '{propertyObject['id']}', '{cadastreType}', {VarIf( propertyObject['status'] == PROPERTY_MARKET_STATUS_ONMARKET, True, False )}, 
-                                         {address['address_id']}, {areaSize}, {bedrooms},
+                                         {address_id}, {areaSize}, {bedrooms},
                                          {bathrooms}, '{' and '.join(propertyObject['features'] )}', current_timestamp, '{raw_json}' )"""
         cur.execute(insert_statement, "")
          #store the sales history of the address if there is any
@@ -80,36 +82,71 @@ def storePropertyInfo( propertyObject ):
         print( "Property with ID " + propertyObject['id'] + " unable to be inserted" )
         print(error)
 
-def storeAddress( addressObject ):
-    try:
-        #store the lotnumber and zone
-        if 'zone' in addressObject:
-            zone = '\'' + addressObject['zone'] + '\''
-        else:
-            zone = "NULL"
+#def storeAddress( addressObject, object_type ):
+#    try:
+#        #store the lotnumber and zone
+#        if 'zone' in addressObject:
+#            zone = '\'' + addressObject['zone'] + '\''
+#        else:
+#            zone = "NULL"
         
-        if 'lot_number' in addressObject:
-            lotNumber = '\'' + addressObject['lot_number'] + '\''
-        else:
-            lotNumber = "NULL"
+#        if 'lot_number' in addressObject:
+#            lotNumber = '\'' + addressObject['lot_number'] + '\''
+#        else:
+#            lotNumber = "NULL"
 
-        if 'lat' not in addressObject and 'lon' not in addressObject:
-            latlong_insert = ')'
-            latlong_values = ')'
-        else:
-            latlong_insert = ', latlong)'
-            latlong_values = ',' + '\'' + f"""SRID=4326;Point({addressObject['lon']} {addressObject['lat']})""" + '\'' + ')'
+#        if 'lat' not in addressObject and 'lon' not in addressObject:
+#            latlong_insert = ')'
+#            latlong_values = ')'
+#        else:
+#            latlong_insert = ', latlong)'
+#            latlong_values = ',' + '\'' + f"""SRID=4326;Point({addressObject['lon']} {addressObject['lat']})""" + '\'' + ')'
     
-        address_insert_statement = f""" INSERT INTO address( address_id, full_address, street_name, street_number, street_type, 
-                                                             suburb_id, postcode, zone, lot_number {latlong_insert}
-                                        VALUES( {addressObject['address_id']}, '{addressObject['full_address']}', '{addressObject['street_name']}', '{addressObject['street_number']}',
-                                               '{addressObject['street_type']}', {addressObject['suburb_id']}, {addressObject['postcode']}, {zone}, {lotNumber} 
-                                                {latlong_values}""" 
-        cur.execute(address_insert_statement, "")
+#        address_insert_statement = f""" INSERT INTO address( full_address, street_name, street_number, 
+#                                                             suburb_id, zone, lot_number {latlong_insert}
+#                                        VALUES( '{addressObject['full_address']}', '{addressObject['street_name']}', '{addressObject['street_number']}',
+#                                                 {addressObject['suburb_id']}, {zone}, {lotNumber} {latlong_values}""" 
+#        cur.execute(address_insert_statement, "")
+
+#    except(Exception, psycopg2.DatabaseError) as error:
+#        print("Offending Address Query: " + address_insert_statement)
+#        print(error) 
+
+def storeAddress( full_address, street_name, street_number, suburb_name, zone, lot_number, longitude, lattitude ):
+    #Set the variables
+    if zone != None:
+        insert_zone = zone
+    else:
+        zone = "NULL"
+    
+    if lot_number != None:
+        insert_lot_number = lot_number
+    else:
+        insert_lot_number = "NULL"
+    
+    if longitude = None and lattitude = None:
+        latlong_insert = ')'
+        latlong_values = ')'
+    else:
+        latlong_insert = ', latlong)'
+        latlong_values = ',' + '\'' + f"""SRID=4326;Point({longitude} {lattitude})""" + '\'' + ')'
+
+    #Get the suburb id
+    suburb_id = QueryWithSingleValue( "suburbs", "name", propertyObject['suburb'], "suburb_id", True )
+
+    
+    address_insert_statement = f""" INSERT INTO address( full_address, street_name, street_number, 
+                                                             suburb_id, zone, lot_number {latlong_insert}
+                                        VALUES( '{full_address}', '{street_name}', {street_number}, {suburb_id}, 
+                                                 {zone}, {lotNumber} {latlong_values}""" 
+    cur.execute(address_insert_statement, "")
+
+    return returnNextSerialID( 'address', 'address_id' )
 
     except(Exception, psycopg2.DatabaseError) as error:
         print("Offending Address Query: " + address_insert_statement)
         print(error) 
+
 
 def storeFiles( fileObject, propertyID ):
     try:
