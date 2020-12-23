@@ -124,5 +124,13 @@ def checkRowExists( query ):
         cur.execute( query, "" )
         return cur.fetchone() is not None
     except(Exception, psycopg2.DatabaseError ) as error:
-        print (error + " Offending Query: " + query )
+        print (error)
+        print( "Offending Query " + query )
+
+def ifNotNone( item, ifNoneReturn ):
+    if item is not None:
+        return item
+    else:
+        return ifNoneReturn
+
 

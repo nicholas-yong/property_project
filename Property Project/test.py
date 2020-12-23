@@ -3,10 +3,14 @@ import sys
 import requests
 import os.path
 from os import path
-from user_functions import QueryWithSingleValue, checkRowExists
+from user_functions import QueryWithSingleValue, checkRowExists, ifNotNone
 import psycopg2
-from properties import storePropertyInfo, StoreListings
+from properties import Property
+from listings import StoreListings
 from database import cur, conn
+from agencies import Agent, Agency
+from files import File
+from contact_details import ContactDetails
 
 client_id = "client_b90eaedfc6a2f7db118ac0266dec1c92"
 client_secret = "secret_3d6127c6a2e4bdfc5992d524b86bef8a"
@@ -14,7 +18,7 @@ scopes_properties = ['api_properties_read']
 scopes_listings = ['api_listings_read']
 scopes_agencies = ['api_agencies_read']
 auth_url = "https://auth.domain.com.au/v1/connect/token"
-url_endpoint_suburb_info = "https://api.domain.com.au/v1/properties/_suggest"
+url_endpoint_suburb_info = "https://api.domain.com.au/v1/properties/_suggest?terms=10+"
 url_endpoint_property_info = "https://api.domain.com.au/v1/properties/"
 url_endpoint_suburbListings_info = "https://api.domain.com.au/v1/listings/residential/_search"
 url_endpoint_listings_info = "https://api.domain.com.au/v1/listings/"
@@ -26,9 +30,9 @@ listings_access_token_cache = ''
 agencies_access_token_cache = ''
 properties_access_token_cache = ''
 
-listings_access_token = 'cb7a168117d228d09cb59a8fb61325fa'
-agencies_access_token = '9fe9bbf0d7d12fce4e00fe59695f5fcb'
-properties_access_token = '707381bae7a6436b604fd4a34ef3812b'
+listings_access_token = ''
+agencies_access_token = ''
+properties_access_token = ''
 
 ### Connectivity Functions
 def get_access_token( scopes_type ):
@@ -128,6 +132,13 @@ def getAgent( agent_id ):
     results = req.json()
     return results
 
+def getPropertyFromListing( address ):
+    auth = {'Authorization': 'Bearer ' + properties_access_token }
+    url = url_endpoint_suburb_info + str(address)
+    req = requests.get( url, headers = auth)
+    results = req.json()
+    return results
+
 def getAccessTokens():
     access_token_file = open( "access_tokens.txt", "a" )
     access_token_file.truncate(0)
@@ -192,9 +203,9 @@ def getAccessTokens():
 ### Storage Functions (Not the actual storage functions, but these act as the function initializers)
 
 def storeFullListing( listing_id ):
-    #Get thje listingObject via the getListing Function
-    listingObject = getListing( listing_id )
     try:
+        #Get thje listingObject via the getListing Function
+        listingObject = getListing( listing_id )
         #Once we've obtained the listingObject, store it.
         StoreListings( listingObject )
         #If the listing is successfully stored...
@@ -202,11 +213,33 @@ def storeFullListing( listing_id ):
         if 'advertiserIdentifiers' in listingObject and listingObject['advertiserIdentifiers']['advertiserType'] == 'agency':
             advertiserObject = listingObject['advertiserIdentifiers']
             if not checkRowExists( f"SELECT 1 FROM agencies WHERE domain_agency_id = {advertiserObject['advertiserId']} " ):
-                #Get the Agency Information
-                agencyObject = getAgency( advertiserObject['advertiserId']
-                storeAgency(agencyObject)
+                #Create a new Agency Object here.
+                agencyObject = getAgency( advertiserObject['advertiserId'] )
+                print( agencyObject['details']['streetAddress1'] )
+                #Seperate parts of the agency object into several different dictionaries to make life easier.
+                agencyProfile = agencyObject['profile']
+                listingAgency = Agency( ifNotNone( agencyProfile['agencyBanner'], None ), ifNotNone( agencyProfile['agencyWebsite'], None ), ifNotNone( agencyProfile['agencyLogoStandard'], None ),
+                                                agencyProfile['mapLongitude'], agencyProfile['mapLatitude'], agencyProfile['agencyDescription'], agencyProfile['numberForSale'],
+                                                agencyProfile['numberForRent'], agencyObject['name'], agencyObject['id'], agencyObject['details']['principalName'], agencyObject,
+                                                agencyObject['contactDetails'], agencyObject['details']['streetAddress1'], agencyObject['details']['streetAddress2'],
+                                                agencyObject['details']['suburb'] )
+                if not listingAgency.storeAgency( ):
+                    raise RuntimeError( "Error in Function storeAgency for Agency " + agencyObject['name'] )
+                if 'agents' in agencyObject:
+                    for agent in agencyObject['agents']:
+                        agentObject = Agent( agent['email'], agent['firstName'], agent['lastName'], agent.get('profile_text', 'NULL'), agent.get('mugshot_url', 'NULL'),
+                                        agent['id'], agencyObject['id'], agent.get('facebook_url', 'NULL'), agent.get('twitter_url', 'NULL'), agent.get('phone', 'NULL'), agent.get('photo', 'NULL') )
+                        if not agentObject.storeAgent( False ):
+                            raise RuntimeError( "Error in Function storeAgent for Agent " + agent['firstName'] + " " + agent['lastName'] )
+        #Once the advertiser has been saved, you want to store any linked property details inside the propery table.
+        listing_address = listingObject['addressParts']['displayAddress']
+        #We don't want to store the address against the listing. Instead, we want to store it to the property that is linked to the listing.
+        propertyObject = getPropertyFromListing( listing_address )
+        #We need to get the first property object when this returns...
+        propertyStore = Property.initFromObject( getPropertyInfo( propertyObject[0]['id']) )
+        propertyStore.saveProperty( False ) 
     except( Exception, psycopg2.DatabaseError ) as error:
-        print(error)
+        print (error)
 
 
 
@@ -230,13 +263,9 @@ def storeFullListing( listing_id ):
 
 ### End DB Functions.
 
-### This always has to be called at the start of running test.py
-getAccessTokens( )
-#getSuburbListingsInfo( 'Alexander Heights')
-#listing_id = 2016460000
-#listingObject = getListing(listing_id)
-#StoreListings(listingObject)
-#conn.commit()
-
-        
+#This always has to be called at the start of running test.py
+getAccessTokens()
+listing_id = 2016573445
+storeFullListing(listing_id)
+conn.commit()
 

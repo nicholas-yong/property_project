@@ -2,6 +2,10 @@ DELETE FROM properties;
 DELETE FROM files;
 DELETE FROM address;
 DELETE FROM images;
+DELETE FROM contact_details;
+DELETE FROM agencies;
+DELETE FROM agents;
+DELETE FROM listings;
 UPDATE keytable
 SET key_value = 1;
 ALTER SEQUENCE properties_property_id_seq RESTART WITH 1;

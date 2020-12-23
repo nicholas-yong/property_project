@@ -50,7 +50,7 @@ app.get('/', async ( req, res ) =>
     }
     catch (error)
     {
-        console.error();
+        console.error( error )
     }
     
     //get the name
