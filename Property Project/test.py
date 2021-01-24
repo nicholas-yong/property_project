@@ -2,8 +2,9 @@ import json
 import sys
 import requests
 import os.path
+import re
 from os import path
-from user_functions import QueryWithSingleValue, checkRowExists, ifNotNone
+from user_functions import QueryWithSingleValue, checkRowExists, ifNotNone, cleanForSQL, VarIf
 import psycopg2
 from properties import Property
 from listings import StoreListings
@@ -23,7 +24,7 @@ url_endpoint_property_info = "https://api.domain.com.au/v1/properties/"
 url_endpoint_suburbListings_info = "https://api.domain.com.au/v1/listings/residential/_search"
 url_endpoint_listings_info = "https://api.domain.com.au/v1/listings/"
 url_endpoint_agencies_info = "https://api.domain.com.au/v1/agencies/"
-url_endpoint_agent_info = "https://api.domain.com.au/v1/agents"
+url_endpoint_agent_info = "https://api.domain.com.au/v1/agents/"
 
 #Constants for Access Tokens
 listings_access_token_cache = ''
@@ -93,23 +94,21 @@ def getSuburbListingsInfo( suburbName ):
                 "region": "",
                 "area": "",
                 "suburb": f"{suburbName}",
-                "postcode": f"{postCode}"
+                "postCode": f"{postCode}",
+                "includeSurroundingSuburbs": False
             }
         ]
     }
-    # Convert the suburbObject to a JSON-formatted string.
-    suburbObject_JSON = json.dumps( suburbObject )
+
+    json_string = json.dumps( suburbObject )
     # Send the request to the Residential Search listings endpoint.
-    req = requests.post( url, headers = auth, data= suburbObject_JSON )
+    req = requests.post( url, headers = auth, data= json_string )
     # Get the results.
     print( req )
     results = req.json()
     debug = open( "debug.txt", "w")
     debug.write( json.dumps( results ) )
-    # Scroll through each listing in the results and store them (Use try/except to scan for errors)
-    #for listing in results:
-    #    listingObject = getListing( listing['id'] )
-    #    StoreListing( listingObject )
+    return results
 
 def getListing( listing_id ):
     auth = {'Authorization': 'Bearer ' + listings_access_token }
@@ -207,65 +206,252 @@ def storeFullListing( listing_id ):
         #Get thje listingObject via the getListing Function
         listingObject = getListing( listing_id )
         #Once we've obtained the listingObject, store it.
-        StoreListings( listingObject )
+        new_listing_id = StoreListings( listingObject )
+        DB_Agent_ID = []
         #If the listing is successfully stored...
         #Check to see if it was advertised by an agency, and if it was, check to see if that agency and its agents have already been stored.
         if 'advertiserIdentifiers' in listingObject and listingObject['advertiserIdentifiers']['advertiserType'] == 'agency':
+            new_agency = False
+            #Get the Agents who organized the listing and place it into a seperate array.
+            agent_listings_ids = listingObject['advertiserIdentifiers'].get('contactIds')
             advertiserObject = listingObject['advertiserIdentifiers']
             if not checkRowExists( f"SELECT 1 FROM agencies WHERE domain_agency_id = {advertiserObject['advertiserId']} " ):
                 #Create a new Agency Object here.
                 agencyObject = getAgency( advertiserObject['advertiserId'] )
-                print( agencyObject['details']['streetAddress1'] )
                 #Seperate parts of the agency object into several different dictionaries to make life easier.
                 agencyProfile = agencyObject['profile']
-                listingAgency = Agency( ifNotNone( agencyProfile['agencyBanner'], None ), ifNotNone( agencyProfile['agencyWebsite'], None ), ifNotNone( agencyProfile['agencyLogoStandard'], None ),
+                listingAgency = Agency(  agencyProfile.get( 'agencyBanner' ), agencyProfile.get('agencyWebsite'), agencyProfile.get('agencyLogoStandard'),
                                                 agencyProfile['mapLongitude'], agencyProfile['mapLatitude'], agencyProfile['agencyDescription'], agencyProfile['numberForSale'],
                                                 agencyProfile['numberForRent'], agencyObject['name'], agencyObject['id'], agencyObject['details']['principalName'], agencyObject,
                                                 agencyObject['contactDetails'], agencyObject['details']['streetAddress1'], agencyObject['details']['streetAddress2'],
-                                                agencyObject['details']['suburb'] )
-                if not listingAgency.storeAgency( ):
+                                                agencyObject['details']['suburb'], None, None, None, agencyObject['details']['state'], agencyObject['details']['postcode'] )
+                new_agency_id = listingAgency.storeAgency()
+                if new_agency_id is None:
                     raise RuntimeError( "Error in Function storeAgency for Agency " + agencyObject['name'] )
                 if 'agents' in agencyObject:
                     for agent in agencyObject['agents']:
-                        agentObject = Agent( agent['email'], agent['firstName'], agent['lastName'], agent.get('profile_text', 'NULL'), agent.get('mugshot_url', 'NULL'),
-                                        agent['id'], agencyObject['id'], agent.get('facebook_url', 'NULL'), agent.get('twitter_url', 'NULL'), agent.get('phone', 'NULL'), agent.get('photo', 'NULL') )
-                        if not agentObject.storeAgent( False ):
-                            raise RuntimeError( "Error in Function storeAgent for Agent " + agent['firstName'] + " " + agent['lastName'] )
+                        #Check to see if the Agent has already been stored.
+                        if not checkRowExists( f"SELECT 1 FROM agents WHERE domain_agent_id = {agent['id']}"  ):
+                            agentObject = Agent( agent['email'], agent['firstName'], agent['lastName'], agent.get('profileText'), agent.get('mugshot_url'),
+                                        agent['id'], new_agency_id, agent.get('facebook_url'), agent.get('twitter_url'), agent.get('phone'), agent.get('photo') )
+                            new_agent_id = agentObject.storeAgent( False )
+                            if new_agent_id is None:
+                                raise RuntimeError( "Error in Function storeAgent for Agent " + agent['firstName'] + " " + agent['lastName'] )
+                            #We only need to do this if there was Agency that created this listing.
+                            if agent_listings_ids is not None and agent['id'] in agent_listings_ids:
+                                DB_Agent_ID.append( new_agent_id )
+                        elif agent_listings_ids is not None and agent['id'] in agent_listings_ids:
+                            #Get the ID of the Agent and append it to the DB_Agent_ID Contact
+                            cur.execute( """ SELECT a.agent_id 
+                                             FROM agents a 
+                                             WHERE a.domain_agent_id = %s
+                                                AND a.cnewrev IS NULL """,
+                                            ( agent['id'] ) )
+                            agent_id = cur.fetchone()
+                            DB_Agent_ID.append( agent_id )
+                new_agency = True
+            #If we are here, that means that the listing was advertised by an Agency.
+            if not new_agency:
+                #If we didn't save a new_agency, we need to get the agency_id/agent_ids from the database/
+                cur.execute( """ SELECT a.agency_id
+                                 FROM agencies a
+                                 WHERE a.domain_agency_id = %s 
+                                        AND a.cnewrev IS NULL """, 
+                                 ( advertiserObject['advertiserId'], ) )
+                new_agency_id = cur.fetchone()[0]
+                if agent_listings_ids is not None:
+                    for agent in agent_listings_ids:
+                        #Agency acquired, now we need to copy the query from before and get the agentids
+                        cur.execute( """ SELECT a.agent_id
+                                        FROM agents a
+                                        WHERE a.domain_agent_id = %s """,
+                                    ( agent, ) )
+                        holder_value = cur.fetchone()
+                        if holder_value is not None:
+                            agent_id = holder_value[0]
+                        else:
+                            #We need to create a new Agent in that case.
+                            new_agent_object = getAgent( agent )
+                            if new_agent_object is not None:
+                                newAgentObject = Agent( new_agent_object['email'], new_agent_object['firstName'], new_agent_object['lastName'], new_agent_object.get('profileText'), new_agent_object.get('mugshot_url'),
+                                        new_agent_object['agencyId'], new_agency_id, new_agent_object.get('facebook_url'), new_agent_object.get('twitter_url'), new_agent_object.get('phone'), new_agent_object.get('photo') )
+                                agent_id = newAgentObject.storeAgent(False)
+                            else:
+                                raise Exception( "Unable to get New Agent Data for Agent " + str(agent))
+
+                        DB_Agent_ID.append( agent_id )
+
+            if DB_Agent_ID is None:
+                cur.execute( """ INSERT INTO agent_listings( agency_id, listings_id, entered_when )
+                                 VALUES( %s, %s, current_timestamp )""",
+                                 ( new_agency_id, new_listing_id ) )
+            else:
+                for agent_id in DB_Agent_ID:
+                    cur.execute( """ INSERT INTO agent_listings( agency_id, agent_id, listings_id, entered_when )
+                                     VALUES( %s, %s, %s, current_timestamp ) """,
+                                     ( new_agency_id, agent_id, new_listing_id ) )
+
         #Once the advertiser has been saved, you want to store any linked property details inside the propery table.
         listing_address = listingObject['addressParts']['displayAddress']
         #We don't want to store the address against the listing. Instead, we want to store it to the property that is linked to the listing.
         propertyObject = getPropertyFromListing( listing_address )
-        #We need to get the first property object when this returns...
-        propertyStore = Property.initFromObject( getPropertyInfo( propertyObject[0]['id']) )
-        propertyStore.saveProperty( False ) 
+        if len( propertyObject ) != 0:
+            #We need to get the first property object when this returns...
+            propertyStore = Property.initFromObject( getPropertyInfo( propertyObject[0]['id']) )
+            new_property_id = propertyStore.saveProperty( False )
+            cur.execute( """ INSERT INTO properties_listings( property_id, listings_id, entered_when )
+                            VALUES( %s, %s, current_timestamp ) """,
+                            ( new_property_id, new_listing_id ) )
+        return True
     except( Exception, psycopg2.DatabaseError ) as error:
-        print (error)
+        print( error )
+        print( "Original Exception Message" + ( error.__cause__ or error.__context__ ))
+        return False
+
+def cleanPrice( ):
+    #We need to establish a set of rules to clean the data
+    try:
+        #As Ella suggested, split each line into a string. But we first need to query the actual information.
+        cur.execute( """SELECT l.display_price, l.listings_id
+                        FROM listings l
+                        WHERE l.price_displayed = FALSE""",    
+                        () )
+        # Get the Results
+        results = cur.fetchall()
+        result_list_exceptions = []
+        #Time for the rules section.
+        for line in results:
+            new_price = None
+            #In actuality, the very first thing that we need to check is the - symbol, as that will identify a range.
+            result = ''.join( line[0] )
+            #We probably need to check if the price is the only thing there too. (just in case)
+            only_price = checkIsPrice( result )
+            if only_price is not None:
+                new_price = only_price
+            else:
+                #result = re.sub( r'(\(|\))', '', result )
+                check_range = result.find( "-" )
+                while True:
+                    if check_range != -1:
+                        #Not sure how to go from here...
+                        #We need to get the prices from both sides...
+                        result_list = str(result).split( )
+                        seperator_index = result_list.index( '-' )
+                        start_price = checkIsPrice( result_list[seperator_index - 1] )
+                        end_price = checkIsPrice( result_list[seperator_index + 1] )
+                        if start_price is not None and end_price is not None:
+                            new_price = round( ( int( start_price ) + int( end_price ) ) / 2, 2 )
+                            break
+                    #if the string contains the word "From" and an int that can be identified as a string...
+                    from_find_result = re.findall( r'from ?\$?\d+\$?', result )
+                    if len( from_find_result ) != 0:
+                        result_list = from_find_result[0].split()
+                        #Verify that the second string is actually a price. (It could have been something like From Your Wonderful Property Developers -_-)
+                        check_price = checkIsPrice( result_list[1] )
+                        if check_price is not None:
+                            new_price = check_price
+                            break
+                    # If both the From and the Range have failed, try and disect the string normally.
+                    result_list = str(result).split( " " )
+                    if len(result_list) == 1:
+                        #If there is only one word in the entire display price, use a regular expression to test if it could be the price.
+                        word_result = checkIsPrice( result_list[0] )
+                        if word_result is not None:
+                            new_price = word_result
+                            break
+                        else:
+                            new_price = None
+                            result_list_exceptions.append( result )
+                    #Step 2: If there is more then one eleement within the string, we need to iterate through all of them and test each one.
+                    else:
+                        for word in result_list:
+                            #Check if it's a price first.
+                            word_result = checkIsPrice( word )
+                            if word_result is None:
+                                continue
+                            else:
+                                new_price = word_result
+                                break
+                        #If it's completely failed
+                        if new_price is None:
+                            result_list_exceptions.append( result )
+                    break
+            if new_price is not None:
+                # If the new price was successfully found for that row, perform an update
+                cur.execute( """ UPDATE listings
+                                 SET price = %s,
+                                       price_displayed = true
+                                 WHERE listings_id = %s """, 
+                                 ( new_price, line[1]) )
+        return True
+    except( Exception, psycopg2.DatabaseError ) as error:
+        print( error )
+        print( line[1])
+        return False
+
+def checkIsPrice( word ):
+    #Remove any commas from the word
+    reg_result = word.replace( ",", "" )
+    reg_result = re.sub( r'(k|K)', '000', reg_result )
+    reg_result = re.sub( r' ?(MILLIONS|MILLION|mils|mil|Milions|MIL\'S|millions|million)', '000000', reg_result )
+    #Try and replace any ks.
+    #result = re.match( r'\$?\d+(k|K)', reg_result )
+    #if result is None:
+        #Restore original result
+        #pass
+    #else:
+    #    reg_result = reg_result[0:len(reg_result) - 1] + '000'
+
+    match_result = re.findall( r'\$?\d+\$?', reg_result )
+    if len(match_result) != 0:
+        return re.findall( r'\d+', reg_result )[0]
+    else:
+        return None
 
 
+def DB_storeProperties():
+    #This will be the function that we use to iterate through the suburbs and store the associated listings.
 
-#def DB_storeProperties():
-    # this opens suburbs_list.txt and returns a list of suburbs seperated by a line from that file.
-#    suburb_list = getSuburbList()
-    # this gets each line of the suburbs_list file.
-#    suburbs = suburb_list.readlines()
+    #We first need to open the suburbs list.
+    suburb_list = getSuburbList()
+    #This gets the suburb_list in list form.
+    suburbs = suburb_list.readlines()
 
-    #Iterate through each line
-#    try:
-#        for suburb in suburbs:
-#            properties = getSuburbInfo(suburb)
-#            firstProperty = properties[0]
-#            addressComponents_PostCode = firstProperty['addressComponents']['postcode']
-#            stripped_suburb = suburb.replace('\n', "")
-#            storeSuburbPostCode( stripped_suburb, addressComponents_PostCode )
-#    except(Exception, psycopg2.DatabaseError) as error:
-#        print(error)
-#    conn.commit()
+    #Get the line that we are currently on.
+    current_line = int( QueryWithSingleValue( 'setup', 'item_name', 'current_list_position', 'item_value', True ) )
+    count = 0
+    suburbs_to_insert = 3
+
+    for suburb in suburbs:
+        if count < current_line:
+            count = count + 1
+            continue
+        if count == suburbs_to_insert + current_line:
+            break
+        else:
+            #Get the JSON Listings Object using the getSuburbListingsInfo Function
+            listings = getSuburbListingsInfo( str.strip( suburb ) )
+            for listing in listings:
+                print( listing['listing']['id'] )
+                if not storeFullListing( listing['listing']['id'] ):
+                    return False
+                else:
+                    cur.execute( """ UPDATE setup
+                                     SET item_value = %s
+                                     WHERE item_name = \'current_list_position\' """ , (count + 1,) )                  
+        count = count + 1
+    conn.commit()
 
 ### End DB Functions.
 
 #This always has to be called at the start of running test.py
-getAccessTokens()
-listing_id = 2016573445
-storeFullListing(listing_id)
+getAccessTokens() 
+#storeFullListing( 2016566833 )
+DB_storeProperties()
+#conn.commit()
+#cleanPrice()
+#print( checkIsPrice( 'From Low $4mils' ) )
+#if not cleanPrice():
+#    pass
 conn.commit()
 

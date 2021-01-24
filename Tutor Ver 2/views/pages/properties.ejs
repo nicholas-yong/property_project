@@ -19,30 +19,38 @@
         </script>
     </head>
         <body>
-          
-          <form>
-            <div class = "suburb_input">
+          <form method = "GET" >
               <span> Suburb: </span>
-              <input id = "Suburb" type = "text" aria-label= "Suburb Input">
-              <button onclick = "test()"> Search </button>
-            </div>
+              <input id = "Suburb" type = "text" name = "SuburbName">
+              <input type = "submit" value = "Submit">
           </form>
-
-          <table>
-            <tr>
-              <td> </td>
-              <td> Address </td>
-              <td> Land Shape </td>
-              <td> Land Size </td>
-              <td> Number of Bedrooms </td>
-              <td> Number of Bathrooms </td>
-              <td> Features </td>
-              <td> Lat, Long </td>
-              <td> Suburb </td>
-              <td> On Market? </td>
-            </tr>
-          </table>
-
+            <table id = "PropertyTable">
+              <thead>
+                <tr>
+                  <td>Headline</td>
+                  <td>Property Price</td>
+                  <td>Address</td>
+                  <td>Listed By</td>
+                  <td>Domain URL</td>
+                  <td>Price Displayed</td>
+                </tr>
+              </thead>
+              <tbody>
+              <% if ( data.propertyData != null ) { %>
+              <% for (var i = 0; i < data.propertyData.Headline.length; i++) { %>
+                <tr>
+                  <td><%- data.propertyData.Headline[i] %></td>
+                  <td><%- data.propertyData.Price[i] %></td>
+                  <td><%- data.propertyData.Address[i] %></td>
+                  <td><%- data.propertyData.AgentName[i] %></td>
+                  <td><%- data.propertyData.seoUrl[i] %></td>
+                  <td><%- data.propertyData.priceDisplay[i] %></td>
+                </tr>
+              <% } %>
+              <% } %>
+              </tbody>
+            </table>
+          <span><%- data.propertyData %></span>
         </body>
 </html>
 

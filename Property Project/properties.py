@@ -1,6 +1,6 @@
 import psycopg2
 import json
-from user_functions import VarIf, convertJSONDate, getKeyValue, QueryWithSingleValue, returnNextSerialID, cleanStringForInsert, checkRowExists
+from user_functions import VarIf, convertJSONDate, getKeyValue, QueryWithSingleValue, returnNextSerialID, cleanForSQL, checkRowExists
 from database import cur, conn
 from user_constants import *
 from files import File
@@ -53,11 +53,11 @@ class Property:
             if self.address_object.address_id is None:
                 new_address_id = self.address_object.storeAddress()
                 if new_address_id is None:
-                    return False
+                    return None
             #Get the next property id
             next_property_id = returnNextSerialID( 'properties', 'property_id' )
             if not self.saveSalesHistory( next_property_id ):
-                return False
+                return None
             
             #Save the Files next.
             for item in self.files:
@@ -75,10 +75,10 @@ class Property:
 
             if commit:
                 conn.commit()
-            return True
+            return next_property_id
         except(Exception, psycopg2.DatabaseError ) as error:
-            print( error )
-            return False
+            print(  "Error in INSERTING Property with Domain Property ID " + str( self.domain_property_id ) + "\n" + error )
+            return None
 
     def saveSalesHistory( self, new_property_id = None ):
         #Need to test if we have a property id to save against.
@@ -97,8 +97,7 @@ class Property:
                     cur.execute( sales_history_insert_statement, "")
             return True
         except(Exception, psycopg2.DatabaseError) as error:
-            print("Offending Property Sales History Query: " +  sales_history_insert_statement )
-            print(error)
+            print( "Error in INSERTING Sales History for Property with Property ID " + str( new_property_id ) + "\n" + "Error: " + error )
             return False
         
 
@@ -106,13 +105,17 @@ class Property:
 ### Data Storage Functions
 class Address:
 
-    def __init__( self, full_address, street_name, suburb_name, street_number = None, zone = None, lot_number = None, long = None, lat = None, address_id = None ):
+    def __init__( self, full_address, street_name, suburb_name, street_number = None, zone = None, lot_number = None, long = None, lat = None, address_id = None, state = None, postCode = None ):
 
         self.full_address = full_address
         self.street_name = street_name
         self.suburb_name = suburb_name
         #Get the Suburb_ID here.
         self.suburb_id = QueryWithSingleValue( "suburbs", "name", self.suburb_name, "suburb_id", True )
+        # If the Suburb ID 
+        if self.suburb_id == None:
+            #We need to insert a new suburb into the Suburbs Table
+            self.suburb_id = self.storeSuburb( suburb_name, state, postCode )
         self.street_number = street_number
         self.zone = zone
         self.lot_number = lot_number
@@ -139,44 +142,29 @@ class Address:
         except( Exception, psycopg2.DatabaseError ) as error:
             print (error)
 
+    def storeSuburb( self, suburbName, state, postCode ):
+        try:
+            new_suburb_id = returnNextSerialID( 'suburbs', 'suburb_id' )
+            cur.execute( """ INSERT INTO suburbs( name, state, is_completed, postcode )
+                             VALUES( %s, %s, %s, %s ) """,
+                             ( suburbName, state, False, postCode ) )
+            return new_suburb_id
+        except( Exception, psycopg2.DatabaseError ) as error:
+            print( error )
 
     def storeAddress( self ):
-        if self.zone is not None:
-            insert_zone = self.zone
-        else:
-            insert_zone = "NULL"
-        
-        if self.lot_number is not None:
-            insert_lot_number = self.lot_number
-        else:
-            insert_lot_number = "NULL"
-        
-        if self.long is None and self.lat is None:
-            latlong_insert = ')'
-            latlong_values = ')'
-        else:
-            latlong_insert = ', latlong)'
-            latlong_values = ',' + '\'' + f"""SRID=4326;Point({self.long} {self.lat})""" + '\'' + ')'
-
-        if  self.street_number is not None:
-            insert_street_number = self.street_number
-        else:
-            insert_street_number = "NULL"
-        
         try:
             address_id = returnNextSerialID( 'address', 'address_id' )
-                    
-            address_insert_statement = f""" INSERT INTO address( full_address, street_name, street_number, 
-                                                                    suburb_id, zone, lot_number {latlong_insert}
-                                                VALUES( '{self.full_address}', '{self.street_name}', {insert_street_number}, {self.suburb_id}, 
-                                                        '{insert_zone}', {insert_lot_number} {latlong_values}""" 
-            cur.execute(address_insert_statement, "")
-
+        
+            cur.execute( """INSERT INTO address( full_address, street_name, street_number, suburb_id, zone, lot_number, latlong )
+                            VALUES( %s, %s, %s, %s, %s, %s, %s )""",
+                            ( self.full_address, self.street_name, self.street_number, self.suburb_id, self.zone, self.lot_number, 
+                              VarIf( self.long is None or self.lat is None, None, f"SRID=4326;Point({self.long} {self.lat})" ) ) )
             return address_id
 
         except(Exception, psycopg2.DatabaseError) as error:
-            print("Offending Address Query: " + address_insert_statement)
-            print(error) 
+            print( "Error in INSERTING Address for Address ID " + "\n" + "Error: " + error )
+            return None
 
 def storeFeatures( id, object_type, feature ):
     """
@@ -199,15 +187,17 @@ def storeFeatures( id, object_type, feature ):
         if row ==  None:
             feature_id = returnNextSerialID( 'object_features', 'feature_id' )
             #We need to store the new feature inside the features table.
-            cur.execute( f""" INSERT INTO features_lkp( feature_id, description) VALUES( {feature_id}, '{cleanStringForInsert(feature)}' )""", "" )
+            cur.execute( f""" INSERT INTO features_lkp( feature_id, description) VALUES( {feature_id}, '{cleanForSQL(feature)}' )""", "" )
         else:
             feature_id = row[0]
         #Once we've acquired the feature_id...
         object_features_insert_statement = f""" INSERT INTO object_features( id, object_type, feature_id, entered_when, entered_who )
                                                 VALUES( {id}, {object_type}, {feature_id}, current_timestamp, 1 )"""
         cur.execute( object_features_insert_statement, "")
+        return True
     except(Exception, psycopg2.DatabaseError) as error:
-        print(error)
+        print( "Error in INSERTING Feature " + feature + "\n" + "Error: " + error )
+        return False
 
 
 

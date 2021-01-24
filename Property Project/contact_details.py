@@ -6,7 +6,7 @@ from user_functions import checkRowExists, returnNextSerialID
 
 class ContactDetails:
 
-    def __init__(self, contact_details_type, object_id, object_type, details, contact_details_id=None ):
+    def __init__(self, contact_details_type, object_type, object_id, details, contact_details_id=None ):
         """
         This is the Init Function for the ContactDetails Object.
 
@@ -41,7 +41,7 @@ class ContactDetails:
         try:
             #First, check to see if the contact_details_type has already been stored inside the contact_details_type_lkp table
             if self.contact_details_id is None:
-                if not checkRowExists( f"SELECT 1 FROM contact_details_type_lkp WHERE UPPER( description ) = '{self.contact_details_type}' " ):
+                if not checkRowExists( f"SELECT 1 FROM contact_details_type_lkp WHERE UPPER( description ) = UPPER( '{self.contact_details_type}' ) " ):
                     self.contact_details_id = returnNextSerialID( 'contact_details_type_lkp', 'contact_details_type' )
                     #If the contact_details_type hasn't been stored...
                     contact_details_type_insert_statement = f"""INSERT INTO contact_details_type_lkp( description )
@@ -49,7 +49,7 @@ class ContactDetails:
                     cur.execute( contact_details_type_insert_statement, "" )
                 else:
                     #Get the matching contact_details_id from the contact_details_type_lkp table.
-                    cur.execute( f"SELECT contact_details_type_lkp FROM contact_details_type_lkp WHERE description = {self.contact_details_type}", "" )
+                    cur.execute( f"SELECT contact_details_type FROM contact_details_type_lkp WHERE description = '{self.contact_details_type}'", "" )
                     row = cur.fetchone()
                     self.contact_details_id = row[0]
 
@@ -61,7 +61,7 @@ class ContactDetails:
             return True
     
         except(Exception, psycopg2.DatabaseError) as error:
-            print(error)
+            print( "Error in INSERTING Contact Details Type " + str( self.contact_details_type ) + " for Object with ID " + str( self.object_id ) + " with Object Type " + str( self.object_type )  + "\n" + "Error: " + error )
             return False
 
 

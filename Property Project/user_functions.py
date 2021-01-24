@@ -70,13 +70,17 @@ def QueryWithSingleValue( tableName, searchColumn, searchValue, valueColumn, sea
 
     """
     try:
-        appended_search_value = VarIf(searchRequiresQuotes, "'" + searchValue + "'", searchValue )
+        if searchRequiresQuotes:
+            appended_search_value = cleanForSQL( searchValue )
+        appended_search_value = VarIf(searchRequiresQuotes, "'" + appended_search_value + "'", appended_search_value )
         query =  f"SELECT {valueColumn} FROM {tableName} WHERE {searchColumn} = {appended_search_value}"
         cur.execute( query, "")
         row = cur.fetchone()
-        return row[0]
+        if row is None:
+            return None
+        else:
+            return row[0]
     except(Exception, psycopg2.DatabaseError) as error:
-        print("Offending Query: " + query)
         print(error)
 
 def returnNextSerialID( tableName, serialColumn ):
@@ -101,7 +105,7 @@ def returnNextSerialID( tableName, serialColumn ):
         print("Offending Query: " + serial_search_query)
         print(error)
 
-def cleanStringForInsert( strToClean ):
+def cleanForSQL( strToClean ):
     """
     Function (currently) replaces all single quotes inside a string to double quotes. (This is to escape the quotes for inserting into postgres)
 

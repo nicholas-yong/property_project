@@ -7,3 +7,36 @@
 {
     width:100%;
 }
+
+
+#PropertyTable
+{
+    // Border Details
+    border-collapse: collapse;
+
+    // Table Position Details
+    display: block;
+    top: 50%;
+    width: 80%;
+    position: fixed;
+    height: 500px;
+
+    // Vertical Scroll Bar Details
+    overflow-x: auto;
+    overflow-y: auto;
+    white-space: nowrap;
+
+    thead td
+    {
+        width: 8%;
+        border: 1px black solid;
+    }
+
+    tbody td
+    {
+        width: 8%;
+        border: 1px black solid;
+    }
+}
+
+

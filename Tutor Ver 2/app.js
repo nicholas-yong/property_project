@@ -1,4 +1,5 @@
 let express = require('express');
+let constants = require('./constants');
 let app = express();
 let upload = require("express-fileupload");
 let fs = require('fs');
@@ -9,7 +10,7 @@ let client = new Client(
     user: 'postgres',
     host: 'localhost',
     database: 'blog',
-    password: 'namihana',
+    password: 'Sadness77',
     port: 5432,
 });
 
@@ -83,22 +84,66 @@ app.get('/projects', (req, res ) =>
 
 app.get('/properties', (req, res) =>
 {
-    axios.get('http://localhost:5000/suburbs')
-     .then( (response) =>
-     {
-        res_data = response.data
-        suburb_names = new Array();
-        for( i = 0; i < res_data.length; i++ )
-        {
-            suburb_names.push( res_data[i][1] );
+    let suburbName = req.query.SuburbName;
+    let property_data = {};
+    axios.get('http://localhost:5000/suburb')
+    .then( (response) =>
+    {
+       res_data = response.data
+       suburb_names = new Array();
+       for( i = 0; i < res_data.length; i++ )
+       {
+           suburb_names.push( res_data[i][1] );
+       }
+
+       if ( suburbName != null )
+       {
+            axios.get('http://localhost:5000/suburbName/' + suburbName )
+             .then( (response ) =>
+            {
+            //We need to create an array of dictionaries. With each dictionaries having
+            //key and value pairs equal to the row item and row values.
+             res_data = response.data
+             let headline = [];
+             let price = [];
+             let address = [];
+             let agentNames = [];
+             let seoUrl = [];
+             let priceDisplay = [];
+             for (i = 0; i < res_data.length; i++ )
+             {
+                headline[i] = res_data[i][0];
+                price[i] = constants.currencyFormatter.format( res_data[i][1] );
+                address[i] = res_data[i][2]
+                agentNames[i] = res_data[i][3];
+                seoUrl[i] = res_data[i][4];
+                priceDisplay[i] = res_data[i][5];
+             }
+             property_data =
+             {
+                 "Headline" : headline,
+                 "Price": price,
+                 "Address": address,
+                 "AgentName" : agentNames,
+                 "seoUrl": seoUrl,
+                 "priceDisplay": priceDisplay
+             }
+             res.render('pages/properties', { data : { suburbNames: suburb_names, propertyData: property_data }});
+            })
+            .catch( (err) =>
+            {
+                console.log(err);
+            });
         }
-        res.render('pages/properties', { data : { suburbNames: suburb_names }});
+        else
+        {
+            res.render('pages/properties', { data : { suburbNames: suburb_names }});
+        }
      })
      .catch( (err) =>
      {
          console.log(err);
      });
-
 });
 
 app.get('/content', async (req, res ) =>

@@ -36,7 +36,7 @@ class File:
                 result = cur.fetchone()
                 self.document_type = result[0]
         except( Exception, psycopg2.DatabaseError ) as error:
-            print( error )
+            print( "Error in Checking Description of File with File ID " + str( self.file_id ) + " with Document Type Description " + self.document_type_description + "\n" + "Error: " + error )
             return None
     
     def storeFile( self, commit ):
@@ -65,28 +65,27 @@ class File:
                 raise ValueError( str( self ) + " has an invalid file type" )
         
         except( ValueError, Exception, psycopg2.DatabaseError ) as error:
-            print( error )
-            print( images_insert_statement )
+            print( "Error in INSERTING File with File ID " + str( image_id ) + "\n"  + "Error " + error )
             return False
 
 
     def __str__(self):
         return f"File {self.file_id}"
 
-def storeFiles( fileObject, propertyID ):
-    try:
-        photos = fileObject['photos']
-
-        for photo in photos:
-            next_image_id = getKeyValue('image_id')
-            #We need to store it inside the image table. Then get the image_id from the image table to INSERT into the files table.
-            images_insert_statement = f""" INSERT into images( image_id, advert_id, date_taken, images_url )
-                                           VALUES( {next_image_id}, {photo['advertId']}, to_timestamp( '{convertJSONDate(photo['date'])}',  'YYYY-MM-DD HH24:MI:SS' ), '{photo['fullUrl']}' )"""
-            cur.execute( images_insert_statement, "")            
-            files_insert_statement = f""" INSERT INTO files( file_id, file_type, file_link_type, keyval1, entered_when )
-                                          VALUES( {next_image_id}, 'images', 1, '{propertyID}', current_timestamp ) """
-            cur.execute( files_insert_statement, "")
-    except(Exception, psycopg2.DatabaseError) as error:
-        print("Offending Images Query: " + images_insert_statement)
-        print("Offending Files Query: " + files_insert_statement)
-        print(error)
+#def storeFiles( fileObject, propertyID ):
+#    try:
+#        photos = fileObject['photos']
+#
+#        for photo in photos:
+#            next_image_id = getKeyValue('image_id')
+#            #We need to store it inside the image table. Then get the image_id from the image table to INSERT into the files table.
+#            images_insert_statement = f""" INSERT into images( image_id, advert_id, date_taken, images_url )
+#                                           VALUES( {next_image_id}, {photo['advertId']}, to_timestamp( '{convertJSONDate(photo['date'])}',  'YYYY-MM-DD HH24:MI:SS' ), '{photo['fullUrl']}' )"""
+#            cur.execute( images_insert_statement, "")            
+#            files_insert_statement = f""" INSERT INTO files( file_id, file_type, file_link_type, keyval1, entered_when )
+#                                          VALUES( {next_image_id}, 'images', 1, '{propertyID}', current_timestamp ) """
+#            cur.execute( files_insert_statement, "")
+#    except(Exception, psycopg2.DatabaseError) as error:
+#        print("Offending Images Query: " + images_insert_statement)
+#        print("Offending Files Query: " + files_insert_statement)
+#        print(error)

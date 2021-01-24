@@ -2,7 +2,7 @@ import psycopg2
 import json
 import re 
 import unicodedata
-from user_functions import VarIf, convertJSONDate, getKeyValue, QueryWithSingleValue, returnNextSerialID, cleanStringForInsert, checkRowExists
+from user_functions import VarIf, convertJSONDate, getKeyValue, QueryWithSingleValue, returnNextSerialID, cleanForSQL, checkRowExists
 from database import cur, conn
 from properties import Address
 from contact_details import ContactDetails
@@ -15,12 +15,18 @@ class Agency:
     variables_set = False
 
     def __init__( self, agency_banner, agency_website, agency_logo_standard, agency_long, agency_lat, agency_description, num_sale, num_rent, name, domain_agency_id, 
-                  principal_agent_name, raw_agency_json, contact_details, streetAddress1, streetAddress2, suburb, agents = None, principal_agent_id = None, agency_id = None ):
+                  principal_agent_name, raw_agency_json, contact_details, streetAddress1, streetAddress2, suburb, agents = None, principal_agent_id = None, agency_id = None,
+                  state = None, postCode = None ):
 
         self.agency_banner = agency_banner
         self.agency_website = agency_website
         self.agency_logo_standard = agency_logo_standard
-        self.agency_description = self.cleanAgencyDescription( agency_description )
+        cleaned_agency_description = self.cleanAgencyDescription( agency_description )
+        #We need to truncate the agency description if its larger then 1000
+        if len(cleaned_agency_description) > 1000:
+            self.agency_description = cleaned_agency_description[0:997] + "..."
+        else:
+            self.agency_description = cleaned_agency_description
         self.num_sale = num_sale
         self.num_rent = num_rent
         self.domain_agency_id = domain_agency_id
@@ -31,22 +37,18 @@ class Agency:
 
         #Set up the address object for the Agency Class
         street_name = streetAddress1 + ' ' + streetAddress2
-        try:
-            cur.execute( f"SELECT s.postcode, s.state FROM suburbs s WHERE UPPER( s.name ) = UPPER( '{suburb}')", "" )
-            result = cur.fetchone()
-            self.suburb = result[0]
-        except( psycopg2.DatabaseError, Exception ) as error:
-            print (error)
-
-        full_address = street_name + ' ' + suburb + ' ' + result[0] + ' ' + str(result[1])
+        full_address = street_name + ' ' + suburb + ' ' + state  + ' ' + str(postCode)
         #We need to get the street number
-        street_number_object = re.search( r"\d+/?\d+", streetAddress1 )
+        street_number_object = re.search( r"\d+/?\d*", streetAddress1 )
         if street_number_object is None:
-            street_number_object = re.search( r"\d+/?\d+", streetAddress2 )
+            street_number_object = re.search( r"\d+/?\d*", streetAddress2 )
         
-        street_number = street_number_object.group(0)
+        if street_number_object is not None:
+            street_number = street_number_object.group(0)
+        else:
+            street_number = None
 
-        self.address = Address( full_address, street_name, suburb, street_number, None, None, agency_long, agency_lat )
+        self.address = Address( full_address, street_name, suburb, street_number, None, None, agency_long, agency_lat, state, postCode )
 
         self.contact_details = contact_details
         if principal_agent_id is not None:
@@ -63,21 +65,26 @@ class Agency:
     def cleanAgencyDescription( self, cleanString ):
         #Use unicodedata.normalize to get rid of the extra Unicode Data
         agency_description_unicode = unicodedata.normalize( "NFKD", cleanString )
-        str_length = len(agency_description_unicode)
+        remove_html_string = re.sub( r"\<\\?[^\>]+\>",
+                                        "",
+                                        agency_description_unicode )
+        #str_length = len( agency_description_unicode )
+        #final_step_string = None
+        #count = 0
         #Find the position of the first span (We know that the main data will be contained inside a span)
-        first_span_position = agency_description_unicode.find( "<span" )
+        #first_span_position = agency_description_unicode.find( "<span" )
         #Slice the String and get the remainder.
-        first_step_string = agency_description_unicode[first_span_position:str_length]
+        #first_step_string = agency_description_unicode[first_span_position:str_length]
         #Get the location of the >, signifiying the end of the first span tag.
-        end_first_span_position = first_step_string.find( ">" )
+        #end_first_span_position = first_step_string.find( ">" )
         #Slice the string again.
-        new_str_length = len(first_step_string)
-        second_step_string = first_step_string[end_first_span_position:new_str_length]
+        #new_str_length = len(first_step_string)
+        #second_step_string = first_step_string[end_first_span_position:new_str_length]
         #Now get the position for the closing span tag.
-        second_span_position = second_step_string.find("</span")
-        final_step_string = second_step_string[1:second_span_position]
+        #second_span_position = second_step_string.find("</span")
+        #final_step_string = second_step_string[1:second_span_position]
 
-        return final_step_string
+        return remove_html_string
 
 
 
@@ -89,19 +96,34 @@ class Agency:
                 raise ValueError( 'Invalid Principal Agent Name' )
             else:
                 full_name = self.principal_agent_name.split()
-                cur.execute( f"SELECT a.agent_id FROM agents a WHERE UPPER( a.first_name ) = UPPER('{full_name[0]}' ) AND UPPER( a.last_name ) = UPPER( '{full_name[1]}' )", "" )
-                result = cur.fetchone()
+                result = None
+                if len(full_name) == 2 :
+                    cur.execute( """ SELECT a.agent_id 
+                                  FROM agents a 
+                                  WHERE UPPER( a.first_name ) = UPPER( %s ) 
+                                        AND UPPER( a.last_name ) = UPPER( %s )""", 
+                             ( cleanForSQL(full_name[0]), cleanForSQL(full_name[1] ) ) )
+                    result = cur.fetchone()
                 if result is None:
                     self.principal_agent_id = None
                 else:
                     self.principal_agent_id = result[0]
             return True
         except( Exception, psycopg2.DatabaseError, ValueError ) as error:
-            print( error )
+            print( "Error in Getting Principal Agent ID for Agency " + self.name + "\n" + error )
             return False
 
     def hasAgencyID( self ):
         return self.agency_id is not None
+    
+    #def checkForNewAgents( self, agents ):
+        #Need to first check if self.agents is populated and that the Agnecy Object has its agency id populated.
+    #    if self.agents is None and self.agency_id is not None:
+    #        cur.execute( """SELECT a.agent_id 
+    #                        FROM agencies_agent a
+    #                        WHERE a.agency_id = %s
+    #                            AND a.deleted_when IS NULL""", 
+    #                        ( self.agency_id ) )
 
     
     def convertToClasses( self ):
@@ -119,7 +141,7 @@ class Agency:
                 agency_banner.addImageDetails( None, None, self.agency_banner )
                 self.agency_banner = agency_banner
 
-                self.agency_website = ContactDetails( 'agency_website', self.agency_id, OBJECT_Agency, self.agency_website )
+                self.agency_website = ContactDetails( 'agency_website', OBJECT_Agency, self.agency_id, self.agency_website )
 
                 agency_logo_standard = File( FILE_TYPE_Images, OBJECT_Agency, self.agency_id, None, "agency_logo_standard" )
                 agency_logo_standard.addImageDetails( None, None, self.agency_logo_standard )
@@ -130,7 +152,8 @@ class Agency:
                     #For now, only store dictionaries. We can handle exceptions by logging them to a debug file.
                     if isinstance( detailsType, dict ):
                         for contact, details in detailsType.items():
-                                self.contact_details_converted.append( ContactDetails( 'agency_' + contactType + '_' + contact, self.agency_id, OBJECT_Agency, details ) )
+                                if details != '':
+                                    self.contact_details_converted.append( ContactDetails( 'agency_' + contactType + '_' + contact, OBJECT_Agency, self.agency_id, details ) )
                     #else:
                     #    self.contact_details_converted.append( ContactDetails( 'agency_' + contactType + '_' + contact, self.agency_id, OBJECT_Agency, details ) )
                 self.classesConverted = True
@@ -145,7 +168,7 @@ class Agency:
                 self.agency_id = returnNextSerialID( 'agencies', 'agency_id' )
 
             if not self.getPrincipalAgent( ):
-                return False
+                return None
             #Convert the data inside the Agency object into Classes
             self.convertToClasses()
             
@@ -161,20 +184,15 @@ class Agency:
             #Store the address first so that we can link the address to the correct row inside the agencies table.
             address_id = self.address.storeAddress()
 
-            if self.principal_agent_id is None:
-                insert_principal_agent_id = "NULL"
-            else:
-                insert_principal_agent_id = self.principal_agent_id
+            agency_json = json.dumps( self.raw_agency_json )
 
-            main_agency_insert_statement = f""" INSERT INTO agencies( description, num_sale, num_rent, entered_when, 
-                                                                      raw_agency_json, name, principal_agent, domain_agency_id, address_id )
-                                                VALUES( '{self.agency_description}', {self.num_sale}, {self.num_rent}, current_timestamp,
-                                                        {cleanStringForInsert(self.raw_agency_json)}, '{self.name}', {insert_principal_agent_id}, {self.domain_agency_id}, {address_id})"""
-            cur.execute( main_agency_insert_statement, "" )
-            return True
+            cur.execute( """INSERT INTO agencies( description, num_sale, num_rent, entered_when, raw_agency_json, name, principal_agent, domain_agency_id, address_id )
+                            VALUES( %s, %s, %s, current_timestamp, %s, %s, %s, %s, %s)""", 
+                            ( self.agency_description, self.num_sale, self.num_rent, cleanForSQL( agency_json ), self.name, self.principal_agent_id, self.domain_agency_id, address_id ) )
+            return self.agency_id
         except( Exception, psycopg2.DatabaseError ) as error:
-            print( error )
-            return False
+            print( "Error in INSERTING New Agency for Agency " + self.name + "\n" + error )
+            return None
 
 
 class Agent:
@@ -203,7 +221,11 @@ class Agent:
         self.last_name = last_name
         self.facebook_url = facebook_url
         self.twitter_url = twitter_url
-        self.profile_text = profile_text
+        input_profile_text = self.cleanProfileText( profile_text )
+        if input_profile_text is not None and len(input_profile_text) > 3000:
+            self.profile_text = input_profile_text[0:2995] + "..."
+        else:
+            self.profile_text = input_profile_text
         self.mugshot_url = mugshot_url
         self.agency_id = agency_id
         self.domain_agent_id = domain_agent_id
@@ -212,42 +234,58 @@ class Agent:
     def initFromObject( cls, agent_id ):
         #Alternate initialization method that queries the database for the specific agent_id and returns the relevant parameters to populate the Agent Instance.
         pass
+    
+    def cleanProfileText( self, profile_text ):
+        if profile_text is None:
+            return profile_text
+        clean_ampersand = profile_text.replace( "&amp;", "&" )
+        clean_apostrophe = clean_ampersand.replace( "&#39;", "'" )
+        clean_rsquo = clean_apostrophe.replace("&rsquo;", "'")
+        clean_elipses = clean_rsquo.replace("&hellip;", "...")
+        clean_quote = clean_rsquo.replace("&quot;", "\"")
+        clean_profile_text_remove_close_p = clean_quote.replace( "</p>", '\n' + '\n' )
+        clean_profile_text = clean_profile_text_remove_close_p.replace( "<p>", "" )
+        return clean_profile_text
 
     
     def storeAgent( self, commit ):
         try:
             self.agent_id = returnNextSerialID( 'agents', 'agent_id' )
             #Stores information contained inside the Agent Object into the Agents table.
-            main_agent_insert_table_statement = f""" INSERT INTO agents( domain_agent_id, entered_when, first_name, last_name, profile_text)
-                                                     VALUES( {self.domain_agent_id}, current_timestamp, '{self.first_name}', '{self.last_name}', '{self.profile_text}')"""
-            cur.execute( main_agent_insert_table_statement, "" )
+            cur.execute( """INSERT INTO agents( domain_agent_id, entered_when, first_name, last_name, profile_text )
+                            VALUES( %s, current_timestamp, %s, %s, %s )""" ,
+                            ( self.domain_agent_id, cleanForSQL(self.first_name), cleanForSQL(self.last_name), self.profile_text ) )
+            #Store the link between the Agent and the Agency inside the agencies_agent table.
+            cur.execute( """INSERT INTO agencies_agent( agency_id, agent_id, entered_when )
+                            VALUES( %s, %s, current_timestamp)""",
+                            ( self.agency_id, self.agent_id ) )
 
-            if self.email != 'NULL':
-                #Store the agent's email
+            if self.email is not None:
+                #Store the agent's emaia
                 contactDetails_email = ContactDetails("agent_email", OBJECT_Agent, self.agent_id, self.email )
                 if not contactDetails_email.storeContactDetails( False ):
                     raise Exception ( psycopg2.DatabaseError )
+            
+            if self.phone is not None:
+                #Store the agent's phone number
+                contactDetails_phone = ContactDetails("agent_phone_number", OBJECT_Agent, self.agent_id, self.phone )
+                if not contactDetails_phone.storeContactDetails( False ):
+                    raise Exception ( psycopg2.DatabaseError )
 
-            #Store the agent's phone number
-            contactDetails_phone = ContactDetails("agent_phone_number", OBJECT_Agent, self.agent_id, self.phone )
-            if not contactDetails_email.storeContactDetails( False ):
-                raise Exception ( psycopg2.DatabaseError )
-
-            if self.facebook_url != 'NULL':
+            if self.facebook_url is not None:
 
                 contactDetails_facebook = ContactDetails( "agent_facebook_url", OBJECT_Agent, self.agent_id, self.facebook_url )
                 #Attempt to save the facebook details
                 if not contactDetails_facebook.storeContactDetails( False ):
                     raise Exception( psycopg2.DatabaseError )
 
-            if self.twitter_url != 'NULL':
-
+            if self.twitter_url is not None:
                 contactDetails_twitter = ContactDetails( "agent_twitter_url", OBJECT_Agent, self.agent_id, self.twitter_url )
                 #Attempt to save the twitter details
                 if not contactDetails_twitter.storeContactDetails( False ):
                     raise Exception( psycopg2.DatabaseError )
 
-            if self.photo != 'NULL':
+            if self.photo is not None:
 
                 #Save the mugshot and agent photo.
                 file_agentPhoto = File( FILE_TYPE_Images, OBJECT_Agent, self.agent_id, None, "agent_photo" )
@@ -255,18 +293,20 @@ class Agent:
                 if not file_agentPhoto.storeFile( False ):
                     raise Exception( psycopg2.DatabaseError )
 
-            if self.mugshot_url != 'NULL':
+            if self.mugshot_url is not None:
 
                 file_agentMugShot = File( FILE_TYPE_Images, OBJECT_Agent, self.agent_id, None, "agent_mugshot" )
                 file_agentMugShot.addImageDetails( None, None, self.mugshot_url )
                 if not file_agentMugShot.storeFile( False ):
                     raise Exception( psycopg2.DatabaseError )
             
-            return True
+            if commit:
+                conn.commit()
+
+            return self.agent_id
 
         except(Exception, psycopg2.DatabaseError) as error:
-            print("Offending Agent Insert Statement: " + main_agent_insert_table_statement )
-            print(error)
-            return False
+            print("Error in INSERTING New Agent " + self.first_name + " " + self.last_name + "\n" + error )
+            return None
 
     

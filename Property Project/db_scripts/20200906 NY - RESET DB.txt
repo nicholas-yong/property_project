@@ -4,8 +4,26 @@ DELETE FROM address;
 DELETE FROM images;
 DELETE FROM contact_details;
 DELETE FROM agencies;
+DELETE FROM agencies_agent;
 DELETE FROM agents;
 DELETE FROM listings;
+DELETE FROM listing_inspections;
+DELETE FROM listing_sales;
 UPDATE keytable
 SET key_value = 1;
 ALTER SEQUENCE properties_property_id_seq RESTART WITH 1;
+ALTER SEQUENCE listings_listings_id_seq RESTART WITH 1;
+ALTER SEQUENCE address_address_id_seq RESTART WITH 1;
+ALTER SEQUENCE agencies_agency_id_seq RESTART WITH 1;
+ALTER SEQUENCE agents_agent_id_seq RESTART WITH 1;
+ALTER SEQUENCE contact_details_contact_details_id_seq RESTART WITH 1;
+ALTER SEQUENCE features_lkp_feature_id_seq RESTART WITH 1;
+ALTER SEQUENCE images_image_id_seq RESTART WITH 1;
+ALTER SEQUENCE inspections_inspection_id_seq RESTART WITH 1;
+ALTER SEQUENCE listings_sales_sales_id_seq RESTART WITH 1;
+ALTER SEQUENCE contact_details_type_lkp_contact_details_type_seq RESTART WITH 1;
+UPDATE setup SET item_value = 0 WHERE item_name = 'current_list_position';
+
+
+SELECT cdtl.description, cd.object_id, cd.object_type, cd.details FROM contact_details cd, contact_details_type_lkp cdtl
+WHERE cdtl.contact_details_type = cd.contact_details_type
