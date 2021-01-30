@@ -1,9 +1,11 @@
 from flask import Flask, redirect, url_for, render_template, jsonify, request, abort, Response
 from flask.json import JSONEncoder
-from flask_ngrok import run_with_ngrok
+from pyngrok import ngrok, conf
 from database import conn, cur
 from decimal import Decimal
 import psycopg2
+import os
+import sys
 
 class CustomJSONEncoder(JSONEncoder):
 
@@ -18,8 +20,30 @@ class CustomJSONEncoder(JSONEncoder):
             return None
         return JSONEncoder.default( self, obj )
 
+#Flask Initialization and Configuration Settings.
 app = Flask(__name__)
-run_with_ngrok( app )
+app.config.from_mapping(
+        BASE_URL = "http://localhost:5000",
+        USE_NGROCK = os.environ.get("USE_NGROK", "FALSE") == "True" and os.environ.get("WERKZEUG_RUN_MAIN") != "true",
+)
+app.config['ENV'] = "development"
+app.config['USE_NGROK']= True
+#Ngrok configuration settings and initialiation.
+ngrok.set_auth_token( "1my7NVoYz9WN8HVt0EKh737zDSC_42sBWTj6fuRvpgBAAhvKY" )
+pyngrock_config = conf.PyngrokConfig(region = 'au')
+conf.set_default(pyngrock_config)
+if app.config.get("ENV") == "development" and app.config.get("USE_NGROK"):
+      
+        # Get the dev server port (defaults to 5000 for Flask, can be overridden with `--port`
+        # when starting the server
+        port = sys.argv[sys.argv.index("--port") + 1] if "--port" in sys.argv else 5000
+
+        # Open a ngrok tunnel to the dev server
+        public_url = ngrok.connect("5000", None, "test_tunnel").public_url
+        print(" * ngrok tunnel \"{}\" -> \"http://127.0.0.1:{}\"".format(public_url, port))
+
+        # Update any base URLs or webhooks to use the public ngrok URL
+        app.config["BASE_URL"] = public_url
 app.json_encoder = CustomJSONEncoder
 
 @app.route("/")
@@ -28,7 +52,7 @@ def home():
     print(verificationCode)
     if verificationCode is None:
         return render_template("index.html" )
-    elif verificationCode == "vfy_9f9cfe8a29fa4995af77bc1698b95ce4":
+    elif verificationCode == "vfy_6bbf259524ee4d9298a0d788b4b4f04f":
         return abort (Response( "test", 204) )
     else:
         return abort (Response( "test", 404) )
