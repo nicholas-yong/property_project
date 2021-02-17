@@ -5,7 +5,7 @@ from database import conn, cur
 from decimal import Decimal
 import psycopg2
 import os
-import sys
+import sys 
 
 class CustomJSONEncoder(JSONEncoder):
 
@@ -22,28 +22,6 @@ class CustomJSONEncoder(JSONEncoder):
 
 #Flask Initialization and Configuration Settings.
 app = Flask(__name__)
-app.config.from_mapping(
-        BASE_URL = "http://localhost:5000",
-        USE_NGROCK = os.environ.get("USE_NGROK", "FALSE") == "True" and os.environ.get("WERKZEUG_RUN_MAIN") != "true",
-)
-app.config['ENV'] = "development"
-app.config['USE_NGROK']= True
-#Ngrok configuration settings and initialiation.
-ngrok.set_auth_token( "1my7NVoYz9WN8HVt0EKh737zDSC_42sBWTj6fuRvpgBAAhvKY" )
-pyngrock_config = conf.PyngrokConfig(region = 'au')
-conf.set_default(pyngrock_config)
-if app.config.get("ENV") == "development" and app.config.get("USE_NGROK"):
-      
-        # Get the dev server port (defaults to 5000 for Flask, can be overridden with `--port`
-        # when starting the server
-        port = sys.argv[sys.argv.index("--port") + 1] if "--port" in sys.argv else 5000
-
-        # Open a ngrok tunnel to the dev server
-        public_url = ngrok.connect("5000", None, "test_tunnel").public_url
-        print(" * ngrok tunnel \"{}\" -> \"http://127.0.0.1:{}\"".format(public_url, port))
-
-        # Update any base URLs or webhooks to use the public ngrok URL
-        app.config["BASE_URL"] = public_url
 app.json_encoder = CustomJSONEncoder
 
 @app.route("/")
@@ -52,7 +30,7 @@ def home():
     print(verificationCode)
     if verificationCode is None:
         return render_template("index.html" )
-    elif verificationCode == "vfy_6bbf259524ee4d9298a0d788b4b4f04f":
+    elif verificationCode == "vfy_8a05920509944d6ead78219e291886e0":
         return abort (Response( "test", 204) )
     else:
         return abort (Response( "test", 404) )
@@ -97,6 +75,15 @@ def suburbName( suburbName ):
     except(Exception, psycopg2.DatabaseError ) as error:
         print(error)
         return "Failure"
+
+@app.route("/domain-webhook/HTTP/1.1")
+def handleNotification( ):
+    #Setup the handler for the webhook notification
+    abort( Response( "None", 204) )
+    notification_file = open( "notification.txt", "w" )
+    notification_file.write( request.form )
+    notification_file.close()
+    
 
 
 if __name__ == "__main__":

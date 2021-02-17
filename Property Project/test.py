@@ -25,6 +25,9 @@ url_endpoint_suburbListings_info = "https://api.domain.com.au/v1/listings/reside
 url_endpoint_listings_info = "https://api.domain.com.au/v1/listings/"
 url_endpoint_agencies_info = "https://api.domain.com.au/v1/agencies/"
 url_endpoint_agent_info = "https://api.domain.com.au/v1/agents/"
+url_endpoint_subscription_creation = "https://api.domain.com.au/v1/webhooks/"
+webhook_authentication_key = "vfy_8a05920509944d6ead78219e291886e0"
+
 
 #Constants for Access Tokens
 listings_access_token_cache = ''
@@ -137,6 +140,29 @@ def getPropertyFromListing( address ):
     req = requests.get( url, headers = auth)
     results = req.json()
     return results
+
+def createListingSubscription( listing_id ):
+    #I don't think we need to use an auth when creating a subscription.
+    url = url_endpoint_subscription_creation + webhook_authentication_key + "/subscriptions"
+    print (url)
+    #Need to do a put request on the listing object.
+    listing_request_object = {
+        "ownerId": listing_id,
+        "ownerType": "group",
+        "resourceType": "listings"
+    }
+    req = requests.post( url, data= listing_request_object )
+    print( req.json() )
+
+def createHeartBeatSubscription( ):
+    url = url_endpoint_subscription_creation + webhook_authentication_key + "/subscriptions"
+    heartbeat_request_object ={
+        "ownerId": "public",
+        "ownerType": "group",
+        "resourceType": "heartbeat"
+    }
+
+    req = requests.post( url, data= heartbeat_request_object )
 
 def getAccessTokens():
     access_token_file = open( "access_tokens.txt", "a" )
@@ -420,7 +446,7 @@ def DB_storeProperties():
     #Get the line that we are currently on.
     current_line = int( QueryWithSingleValue( 'setup', 'item_name', 'current_list_position', 'item_value', True ) )
     count = 0
-    suburbs_to_insert = 3
+    suburbs_to_insert = 5
 
     for suburb in suburbs:
         if count < current_line:
@@ -453,5 +479,6 @@ DB_storeProperties()
 #print( checkIsPrice( 'From Low $4mils' ) )
 #if not cleanPrice():
 #    pass
-conn.commit()
+#conn.commit()
+#createListingSubscription( 2016729997 )
 
